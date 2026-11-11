@@ -36,6 +36,32 @@ test('incoming message replay creates exactly one run and health updates are val
   } finally { await f.cleanup(); }
 });
 
+test('chat receipt uses a reaction and removes it only after result delivery', async () => {
+  const f = fixture();
+  const events: string[] = [];
+  let failSend = true;
+  f.messenger.react = async message => { events.push(`react:${message.messageId}`); return 'reaction-1'; };
+  f.messenger.unreact = async (message, reactionId) => { events.push(`unreact:${message.messageId}:${reactionId}`); };
+  f.messenger.send = async () => {
+    events.push('send');
+    if (failSend) { failSend = false; throw new Error('network'); }
+    return 'remote-id';
+  };
+  try {
+    const input = f.message('帮我总结', 'health', 'message-1');
+    f.dispatcher.receive(input);
+    assert.equal(f.store.pending().length, 0, 'receipt must not create a text reply');
+    await f.dispatcher.waitIdle();
+    assert.equal(f.store.pending().length, 1);
+    await f.dispatcher.deliver();
+    assert.deepEqual(events, ['react:message-1', 'send']);
+    f.store.db.prepare("UPDATE outbox SET next_at=0 WHERE status='pending'").run();
+    await f.dispatcher.deliver();
+    assert.deepEqual(events, ['react:message-1', 'send', 'send', 'unreact:message-1:reaction-1']);
+    assert.equal(f.store.failedDeliveries('health'), 0);
+  } finally { await f.cleanup(); }
+});
+
 test('session mapping resolves at execution time, runs serialize per agent and overlap across agents', async () => {
   const running = new Set<string>();
   let peak = 0;

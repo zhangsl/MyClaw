@@ -6,7 +6,7 @@ import { Store } from '../src/store.js';
 import { Scheduler } from '../src/scheduler.js';
 import { Services } from '../src/services.js';
 import { Dispatcher } from '../src/dispatcher.js';
-import type { Engine, Inbound, Outbound } from '../src/types.js';
+import type { Engine, Inbound, Messenger, Outbound } from '../src/types.js';
 
 export function fixture(engine: Engine = { async execute({ run }) { return `完成:${run.input}`; } }) {
   const root = mkdtempSync(join(tmpdir(), 'myclaw-test-'));
@@ -25,7 +25,7 @@ export function fixture(engine: Engine = { async execute({ run }) { return `完�
   const scheduler = new Scheduler(store, agents.map(a => a.id));
   const services = new Services(store, scheduler, config.timezone);
   const sent: Outbound[] = [];
-  const messenger = { async send(m: Outbound) { sent.push(m); return `remote:${m.id}`; } };
+  const messenger: Messenger = { async send(m: Outbound) { sent.push(m); return `remote:${m.id}`; } };
   const dispatcher = new Dispatcher(config, store, scheduler, engine, messenger);
   const message = (text: string, agentId = 'health', messageId = crypto.randomUUID()): Inbound => ({ agentId, chatId: `chat-${agentId}`, senderId: 'owner', messageId, text });
   return { root, config, store, scheduler, services, sent, messenger, dispatcher, message,

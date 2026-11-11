@@ -68,6 +68,22 @@ export class FeishuGateway implements Messenger {
     if (response.code !== 0 || !response.data?.message_id) throw new Error(`飞书发送失败 code=${response.code}`);
     return response.data.message_id;
   }
+  async react(message: Inbound): Promise<string> {
+    const client = this.clients.get(message.agentId);
+    if (!client) throw new Error('Agent 未启用');
+    const response = await client.im.v1.messageReaction.create({
+      path: { message_id: message.messageId },
+      data: { reaction_type: { emoji_type: 'Get' } },
+    });
+    if (response.code !== 0 || !response.data?.reaction_id) throw new Error(`飞书表情回复失败 code=${response.code}`);
+    return response.data.reaction_id;
+  }
+  async unreact(message: Inbound, reactionId: string): Promise<void> {
+    const client = this.clients.get(message.agentId);
+    if (!client) throw new Error('Agent 未启用');
+    const response = await client.im.v1.messageReaction.delete({ path: { message_id: message.messageId, reaction_id: reactionId } });
+    if (response.code !== 0) throw new Error(`飞书撤回表情回复失败 code=${response.code}`);
+  }
   close(): void { this.sockets.forEach(s => s.close({ force: true })); }
 }
 

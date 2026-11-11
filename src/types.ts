@@ -52,10 +52,13 @@ export interface Outbound {
   remote_id: string | null;
   error: string | null;
   first_attempt_at: number | null;
+  run_id: string | null;
 }
 
 export interface Messenger {
   send(message: Outbound): Promise<string>;
+  react?(message: Inbound): Promise<string>;
+  unreact?(message: Inbound, reactionId: string): Promise<void>;
 }
 
 export interface EngineRequest {

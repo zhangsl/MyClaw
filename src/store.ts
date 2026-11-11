@@ -6,7 +6,7 @@ export class Store {
   readonly db: DatabaseSync;
   constructor(path: string) {
     this.db = new DatabaseSync(path);
-    if ((this.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version > 2) throw new Error('数据库版本比当前程序新，请升级程序');
+    if ((this.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version > 3) throw new Error('数据库版本比当前程序新，请升级程序');
     this.db.exec(`
       PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON;
       CREATE TABLE IF NOT EXISTS inbox (
@@ -30,7 +30,7 @@ export class Store {
       CREATE TABLE IF NOT EXISTS outbox (
         id TEXT PRIMARY KEY, dedup TEXT UNIQUE NOT NULL, agent_id TEXT NOT NULL, chat_id TEXT NOT NULL,
         text TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, next_at INTEGER NOT NULL,
-        status TEXT NOT NULL DEFAULT 'pending', remote_id TEXT, error TEXT, first_attempt_at INTEGER);
+        status TEXT NOT NULL DEFAULT 'pending', remote_id TEXT, error TEXT, first_attempt_at INTEGER, run_id TEXT);
       CREATE TABLE IF NOT EXISTS health_records (
         agent_id TEXT NOT NULL, kind TEXT NOT NULL, day TEXT NOT NULL, value REAL NOT NULL,
         note TEXT NOT NULL, source TEXT NOT NULL, updated_at INTEGER NOT NULL,
@@ -41,7 +41,8 @@ export class Store {
     `);
     const columns = this.db.prepare('PRAGMA table_info(outbox)').all() as { name: string }[];
     if (!columns.some(c => c.name === 'first_attempt_at')) this.db.exec('ALTER TABLE outbox ADD COLUMN first_attempt_at INTEGER');
-    this.db.exec('PRAGMA user_version=2');
+    if (!columns.some(c => c.name === 'run_id')) this.db.exec('ALTER TABLE outbox ADD COLUMN run_id TEXT');
+    this.db.exec('PRAGMA user_version=3');
   }
 
   transaction<T>(fn: () => T): T {
@@ -107,9 +108,9 @@ export class Store {
       .all(agentId, chatId) as unknown as Run[];
   }
 
-  queueReply(agentId: string, chatId: string, text: string, dedup: string, now = Date.now()): void {
-    splitText(text).forEach((chunk, i) => this.db.prepare('INSERT OR IGNORE INTO outbox(id,dedup,agent_id,chat_id,text,next_at) VALUES(?,?,?,?,?,?)')
-      .run(id(), `${dedup}:${i}`, agentId, chatId, chunk, now));
+  queueReply(agentId: string, chatId: string, text: string, dedup: string, now = Date.now(), runId: string | null = null): void {
+    splitText(text).forEach((chunk, i) => this.db.prepare('INSERT OR IGNORE INTO outbox(id,dedup,agent_id,chat_id,text,next_at,run_id) VALUES(?,?,?,?,?,?,?)')
+      .run(id(), `${dedup}:${i}`, agentId, chatId, chunk, now, runId));
   }
   pending(now = Date.now()): Outbound[] {
     // Preserve message/chunk ordering within a chat; other bots are not held up.
@@ -120,6 +121,9 @@ export class Store {
   }
   sent(message: Outbound, remoteId: string): void {
     this.db.prepare("UPDATE outbox SET status='sent',remote_id=?,error=NULL WHERE id=?").run(remoteId, message.id);
+  }
+  hasPendingReply(runId: string): boolean {
+    return !!this.db.prepare("SELECT 1 FROM outbox WHERE run_id=? AND status='pending' LIMIT 1").get(runId);
   }
   beginAttempt(message: Outbound, now = Date.now()): boolean {
     if (message.first_attempt_at !== null && now - message.first_attempt_at > 50 * 60_000) {

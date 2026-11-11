@@ -22,6 +22,7 @@ export const HELP = `MyClaw 命令：
 
 export class Dispatcher {
   private active = new Map<string, { run: Run; abort: AbortController; promise: Promise<void> }>();
+  private reactions = new Map<string, Promise<{ message: Inbound; reactionId: string } | null>>();
   private delivering = false;
   private closing = false;
   constructor(readonly config: Config, readonly store: Store, readonly scheduler: Scheduler,
@@ -31,6 +32,7 @@ export class Dispatcher {
     const agent = this.config.agents.find(a => a.id === message.agentId);
     if (!agent || this.closing) return;
     if (message.text.length > 30000) message = { ...message, text: '/invalid-message-too-long' };
+    let runId: string | undefined;
     this.store.transaction(() => {
       if (!this.store.accept(message)) return;
       const reply = (text: string) => this.store.queueReply(agent.id, message.chatId, text, `command:${agent.id}:${message.messageId}`);
@@ -102,14 +104,19 @@ export class Dispatcher {
         }
         if (text.startsWith('/')) return reply('未知命令或消息过长。输入 /help 查看用法。');
         if (this.store.active(agent.id).length >= this.config.maxQueuedPerAgent) return reply('此助理的等待队列已满，请稍后再发。');
-        const runId = this.store.enqueue(agent.id, message.chatId, `message:${message.messageId}`, text);
-        this.store.queueReply(agent.id, message.chatId, `已接收，任务 ${runId.slice(0, 8)}。`, `accepted:${runId}`);
+        runId = this.store.enqueue(agent.id, message.chatId, `message:${message.messageId}`, text);
       } catch (error) {
         // User-facing command validation only; never print raw SDK errors or credentials.
         const reason = error instanceof SyntaxError ? 'JSON 格式不正确' : error instanceof Error ? error.message : '参数错误';
         reply(`未完成：${reason.slice(0, 1200)}`);
       }
     });
+    if (runId && this.messenger.react) {
+      const id = runId;
+      this.reactions.set(id, Promise.resolve().then(() => this.messenger.react!(message))
+        .then(reactionId => ({ message, reactionId }))
+        .catch(() => { log('reaction_failed', { agent: message.agentId, run: id }); return null; }));
+    }
   }
 
   private formatSchedule(s: { id: string; name: string; enabled: number; timezone: string; next_at: number | null; action: string; cron: string | null }): string {
@@ -138,7 +145,7 @@ export class Dispatcher {
       abort.signal.throwIfAborted();
       this.store.transaction(() => {
         this.store.finish(run.id, 'succeeded', result);
-        if (result.trim() !== '[NO_REPLY]' || run.kind === 'chat') this.store.queueReply(run.agent_id, run.chat_id, result, `result:${run.id}`);
+        if (result.trim() !== '[NO_REPLY]' || run.kind === 'chat') this.store.queueReply(run.agent_id, run.chat_id, result, `result:${run.id}`, Date.now(), run.id);
       });
       log('run_finished', { agent: run.agent_id, run: run.id });
     } catch (error) {
@@ -147,13 +154,22 @@ export class Dispatcher {
       this.store.transaction(() => {
         this.store.finish(run.id, status, null, reason);
         const text = reason === 'timeout' ? '执行超时，已请求停止。' : status === 'cancelled' ? '任务已停止。' : status === 'interrupted' ? '服务退出，任务已中断。' : '执行失败，请检查模型配置或服务日志。';
-        this.store.queueReply(run.agent_id, run.chat_id, `${text} 任务 ${run.id.slice(0, 8)}。已发生的操作不会撤销。`, `result:${run.id}`);
+        this.store.queueReply(run.agent_id, run.chat_id, `${text} 任务 ${run.id.slice(0, 8)}。已发生的操作不会撤销。`, `result:${run.id}`, Date.now(), run.id);
       });
       log('run_failed', { agent: run.agent_id, run: run.id, reason, errorType: error instanceof Error ? error.name : 'unknown' });
     } finally {
       clearTimeout(timer);
       this.active.delete(run.agent_id);
     }
+  }
+  private async removeReaction(runId: string): Promise<void> {
+    const pending = this.reactions.get(runId);
+    if (!pending) return;
+    this.reactions.delete(runId);
+    const reaction = await pending;
+    if (!reaction || !this.messenger.unreact) return;
+    try { await this.messenger.unreact(reaction.message, reaction.reactionId); }
+    catch { log('reaction_removal_failed', { agent: reaction.message.agentId, run: runId }); }
   }
   async deliver(): Promise<void> {
     if (this.delivering) return;
@@ -163,7 +179,11 @@ export class Dispatcher {
       await Promise.all(this.store.pending().filter(m => enabled.has(m.agent_id)).map(async message => {
         if (!this.store.beginAttempt(message)) { log('delivery_ambiguous', { agent: message.agent_id, message: message.id }); return; }
         try { this.store.sent(message, await this.messenger.send(message)); }
-        catch { this.store.sendFailed(message); log('delivery_failed', { agent: message.agent_id, message: message.id }); }
+        catch {
+          this.store.sendFailed(message); log('delivery_failed', { agent: message.agent_id, message: message.id });
+          return;
+        }
+        if (message.run_id && !this.store.hasPendingReply(message.run_id)) await this.removeReaction(message.run_id);
       }));
     } finally { this.delivering = false; }
   }
