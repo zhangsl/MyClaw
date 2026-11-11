@@ -1,0 +1,61 @@
+timezone: Asia/Shanghai
+dataDir: ./data
+maxConcurrentRuns: 2
+maxQueuedPerAgent: 50
+# 自定义或兼容接口可配置 modelsFile，格式见 docs/EXTENSIONS.md。
+# modelsFile: ./models.json
+
+agents:
+  - id: health
+    name: 健康助理
+    persona: agents/health/persona.md
+    skills: [agents/health/skills]
+    sharedKnowledge: [shared/profile.md, shared/preferences.md]
+    builtinTools: [read]
+    healthTools: true
+    timeoutSeconds: 180
+    maxToolCalls: 25
+    model:
+      provider: anthropic
+      id: claude-sonnet-4-5
+      apiKeyEnv: ANTHROPIC_API_KEY
+    feishu:
+      appIdEnv: HEALTH_FEISHU_APP_ID
+      appSecretEnv: HEALTH_FEISHU_APP_SECRET
+      ownerOpenIdEnv: HEALTH_OWNER_OPEN_ID
+
+  - id: finance
+    name: 财务管家
+    persona: agents/finance/persona.md
+    skills: [agents/finance/skills]
+    sharedKnowledge: [shared/profile.md, shared/preferences.md]
+    builtinTools: [read]
+    timeoutSeconds: 300
+    maxToolCalls: 40
+    model:
+      provider: anthropic
+      id: claude-sonnet-4-5
+      apiKeyEnv: ANTHROPIC_API_KEY
+    feishu:
+      appIdEnv: FINANCE_FEISHU_APP_ID
+      appSecretEnv: FINANCE_FEISHU_APP_SECRET
+      ownerOpenIdEnv: FINANCE_OWNER_OPEN_ID
+
+  - id: coder
+    name: 编程助理
+    persona: agents/coder/persona.md
+    skills: [agents/coder/skills]
+    sharedKnowledge: [shared/profile.md, shared/preferences.md]
+    builtinTools: [read, bash, edit, write, grep, find, ls]
+    # 默认使用 data/agents/coder/workspace。指定已有仓库时改为绝对路径：
+    # workspace: /srv/projects/my-project
+    timeoutSeconds: 900
+    maxToolCalls: 100
+    model:
+      provider: anthropic
+      id: claude-sonnet-4-5
+      apiKeyEnv: ANTHROPIC_API_KEY
+    feishu:
+      appIdEnv: CODER_FEISHU_APP_ID
+      appSecretEnv: CODER_FEISHU_APP_SECRET
+      ownerOpenIdEnv: CODER_OWNER_OPEN_ID

@@ -1,8 +1,8 @@
 node_modules/
 dist/
 data/
+data-demo/
+config.yaml
 .env
-accounts.json
 *.log
-.DS_Store
-bin/lark
+*.zip

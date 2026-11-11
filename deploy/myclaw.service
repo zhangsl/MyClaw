@@ -1,0 +1,23 @@
+[Unit]
+Description=MyClaw personal assistants
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=myclaw
+Group=myclaw
+WorkingDirectory=/opt/myclaw
+EnvironmentFile=/opt/myclaw/.env
+Environment=NODE_ENV=production
+Environment=TZ=Asia/Shanghai
+ExecStart=/usr/bin/node /opt/myclaw/dist/main.js --config /opt/myclaw/config.yaml
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+KillMode=control-group
+UMask=0077
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

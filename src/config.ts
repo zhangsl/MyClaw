@@ -1,114 +1,71 @@
-import 'dotenv/config';
-import fs from 'node:fs';
-import path from 'node:path';
+import { readFileSync, mkdirSync } from 'node:fs';
+import { dirname, resolve, join } from 'node:path';
+import { parse } from 'yaml';
 import { z } from 'zod';
 
-export const envSchema = z.object({
-  ANTHROPIC_API_KEY: z.string().min(1),
-  ANTHROPIC_BASE_URL: z.string().url().optional(),
-  CLAUDE_MODEL: z.string().default('claude-sonnet-4-7'),
-  CLAUDE_MAX_TOKENS: z.coerce.number().default(2048),
-
-  ZCLAW_DATA_DIR: z.string().default('./data'),
-  ZCLAW_LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
-  ZCLAW_SESSION_MAX_MESSAGES: z.coerce.number().default(20),
-  ZCLAW_SESSION_TTL_MS: z.coerce.number().default(3600000),
-  ZCLAW_MEDIA_MAX_MB: z.coerce.number().default(30),
-
-  LARK_CLI_PATH: z.string().optional(),
-  ZCLAW_ACCOUNTS_CONFIG: z.string().default('./accounts.json'),
-  ZCLAW_TASKS_CONFIG: z.string().default('./tasks.json'),
-});
-
-export type EnvConfig = z.infer<typeof envSchema>;
-
-export const agentConfigSchema = z.object({
-  systemPrompt: z.string().optional(),
-  model: z.string().optional(),
-  maxTokens: z.coerce.number().optional(),
-  enabledTools: z.array(z.string()).optional(),
-});
-
-export type AgentConfig = z.infer<typeof agentConfigSchema>;
-
-export const feishuAccountSchema = z.object({
-  appId: z.string().min(1),
-  appSecret: z.string().min(1),
-  encryptKey: z.string().optional(),
-  verificationToken: z.string().optional(),
-  brand: z.enum(['feishu', 'lark']).default('feishu'),
-  enabled: z.boolean().default(true),
-  agent: agentConfigSchema.optional(),
-});
-
-export type FeishuAccountConfig = z.infer<typeof feishuAccountSchema>;
-
-export const accountsConfigSchema = z.object({
-  accounts: z.record(z.string(), feishuAccountSchema),
-});
-
-export type AccountsConfig = z.infer<typeof accountsConfigSchema>;
-
-export const taskActionSchema = z.object({
-  type: z.string().min(1),
-  payload: z.record(z.unknown()).default({}),
-});
-
-export const scheduledTaskSchema = z.object({
-  id: z.string().min(1),
-  workspaceId: z.string().min(1),
+const agentSchema = z.object({
+  id: z.string().regex(/^[a-z][a-z0-9_-]{0,31}$/),
   name: z.string().min(1),
-  description: z.string().optional(),
-  cron: z.string().min(1),
   enabled: z.boolean().default(true),
-  action: taskActionSchema,
-});
+  persona: z.string(),
+  workspace: z.string().optional(),
+  skills: z.array(z.string()).default([]),
+  sharedKnowledge: z.array(z.string()).default([]),
+  builtinTools: z.array(z.enum(['read', 'bash', 'edit', 'write', 'grep', 'find', 'ls'])).default(['read']),
+  healthTools: z.boolean().default(false),
+  timeoutSeconds: z.number().int().min(10).max(7200).default(300),
+  maxToolCalls: z.number().int().min(1).max(500).default(50),
+  model: z.object({ provider: z.string(), id: z.string(), apiKeyEnv: z.string().optional() }),
+  feishu: z.object({
+    appIdEnv: z.string(), appSecretEnv: z.string(), ownerOpenIdEnv: z.string(),
+  }),
+}).strict();
 
-export type ScheduledTaskConfig = z.infer<typeof scheduledTaskSchema>;
+const schema = z.object({
+  timezone: z.string().default('Asia/Shanghai'),
+  dataDir: z.string().default('./data'),
+  maxConcurrentRuns: z.number().int().min(1).max(8).default(2),
+  maxQueuedPerAgent: z.number().int().min(1).max(1000).default(50),
+  modelsFile: z.string().optional(),
+  agents: z.array(agentSchema).min(1),
+}).strict();
 
-export const tasksConfigSchema = z.object({
-  tasks: z.array(scheduledTaskSchema).default([]),
-});
-
-export type TasksConfig = z.infer<typeof tasksConfigSchema>;
-
-export interface ZClawConfig {
-  env: EnvConfig;
-  accounts: AccountsConfig;
-  tasks: TasksConfig;
+export type AgentConfig = z.infer<typeof agentSchema> & { directory: string };
+export interface Config extends Omit<z.infer<typeof schema>, 'agents'> {
+  root: string;
+  agents: AgentConfig[];
 }
 
-function loadEnv(): EnvConfig {
-  return envSchema.parse(process.env);
-}
-
-function loadAccounts(configPath: string): AccountsConfig {
-  const resolved = path.resolve(configPath);
-  if (!fs.existsSync(resolved)) {
-    throw new Error(`Accounts config not found: ${resolved}. Create it from accounts.json.example`);
-  }
-  const raw = JSON.parse(fs.readFileSync(resolved, 'utf8')) as unknown;
-  return accountsConfigSchema.parse(raw);
-}
-
-function loadTasks(configPath: string): TasksConfig {
-  const resolved = path.resolve(configPath);
-  if (!fs.existsSync(resolved)) {
-    return { tasks: [] };
-  }
-  const raw = JSON.parse(fs.readFileSync(resolved, 'utf8')) as unknown;
-  return tasksConfigSchema.parse(raw);
-}
-
-export function loadConfig(): ZClawConfig {
-  const env = loadEnv();
-  const accounts = loadAccounts(env.ZCLAW_ACCOUNTS_CONFIG);
-  const tasks = loadTasks(env.ZCLAW_TASKS_CONFIG);
-  return { env, accounts, tasks };
-}
-
-export function getDataDir(config: ZClawConfig): string {
-  const dir = path.resolve(config.env.ZCLAW_DATA_DIR);
-  fs.mkdirSync(dir, { recursive: true });
-  return dir;
+export function loadConfig(file: string, demo = false): Config {
+  const root = dirname(resolve(file));
+  const input = schema.parse(parse(readFileSync(file, 'utf8')));
+  new Intl.DateTimeFormat('en', { timeZone: input.timezone }).format();
+  const dataDir = resolve(root, demo ? './data-demo' : input.dataDir);
+  const ids = new Set<string>();
+  const appIds = new Set<string>();
+  const agents = input.agents.filter(a => a.enabled).map(a => {
+    if (ids.has(a.id)) throw new Error(`重复 Agent ID: ${a.id}`);
+    ids.add(a.id);
+    if (!demo) {
+      for (const key of Object.values(a.feishu)) {
+        if (!process.env[key]?.trim()) throw new Error(`缺少环境变量 ${key}`);
+      }
+      const appId = process.env[a.feishu.appIdEnv]!;
+      if (appIds.has(appId)) throw new Error('每个 Agent 必须使用不同的飞书 App ID');
+      appIds.add(appId);
+    }
+    const directory = join(dataDir, 'agents', a.id);
+    const workspace = a.workspace ? resolve(root, a.workspace) : join(directory, 'workspace');
+    const persona = resolve(root, a.persona);
+    readFileSync(persona, 'utf8');
+    const sharedKnowledge = a.sharedKnowledge.map(p => resolve(root, p));
+    sharedKnowledge.forEach(p => readFileSync(p, 'utf8'));
+    const skills = a.skills.map(p => resolve(root, p));
+    for (const p of [directory, workspace, join(directory, 'sessions'), join(directory, 'pi')]) {
+      mkdirSync(p, { recursive: true, mode: 0o700 });
+    }
+    return { ...a, directory, workspace, persona, sharedKnowledge, skills };
+  });
+  if (!agents.length) throw new Error('至少启用一个 Agent');
+  return { ...input, root, dataDir, agents, modelsFile: input.modelsFile ? resolve(root, input.modelsFile) : undefined };
 }

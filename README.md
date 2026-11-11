@@ -1,282 +1,168 @@
-# ZClaw
+# MyClaw
 
-Feishu-native AI Agent framework powered by Claude.
+面向个人的轻量多 Agent 助理：一个 Linux 常驻程序，多个飞书机器人，Pi Agent SDK，一个 SQLite 数据库。没有容器、Redis、Web 管理后台或多 Agent 协商框架。
 
-## Features
+## 已实现
 
-- Real-time events via `@larksuiteoapi/node-sdk` WebSocket
-- Complex Feishu operations via `lark-cli` subprocess
-- SQLite persistence for sessions and message history
-- Anthropic SDK in-process Claude calls with tool use
-- **Multi-account Feishu support with workspace isolation**
-- **Full image/file support**: inbound images and files are downloaded and sent to Claude as content blocks
-- **Full card interaction**: send interactive cards, handle button/form clicks, update existing cards
+- 健康、财务、编程三个助理模板；可增减 Agent，每个绑定独立飞书应用。
+- 个人私聊与按应用配置的 owner open_id 白名单。
+- 每个 Agent 的人格、工作目录、SDK 会话和长期记忆分开；共享资料显式配置、每次运行重新加载。
+- Pi SDK 的真实模型调用、工具执行、历史会话恢复与自动上下文压缩。
+- 私聊连续会话；后台定时任务使用独立会话，可查询最近任务结果。
+- 自然语言创建/修改/暂停/恢复/删除计划；也有无需模型的命令。
+- cron（五段、最小一分钟）和一次性时间，明确时区，错过执行策略、同一计划不积压并发实例。
+- 体重与每日累计运动分钟的结构化记录、查询、修正和删除。
+- 消息去重、每 Agent 串行、全局并发上限、取消、超时、重启恢复、回复单独重试。
+- 现成 Pi Skill 目录接入；业务功能可继续扩展。
+- 模拟运行模式、本地真实模型模式、自动化测试、systemd 示例。
 
-## Quick Start
+**首版仅接收和发送文字。** 图片、文件、语音、流式卡片、Agent 相互委派和交易执行尚未实现。财务助理未内置任何行情供应商；它会明确说明没有实时数据，不能开箱即用盯盘。安装行情 Skill/工具后再建立相应计划。
 
-1. Install dependencies:
-   ```bash
-   pnpm install
-   ```
+## 环境
 
-2. Copy `.env.example` to `.env` and fill in your credentials.
+- Linux，Node.js **24.19.0 或更高版本**（建议 Node 24 LTS），npm。
+- 网络可访问 npm、飞书开放平台和你选用的模型服务。
+- 生产运行不需要开放入站端口；飞书使用向外建立的 WebSocket 长连接。
+- 建议用普通专用 OS 账户。编程助理的 shell 拥有这个账户的权限。
 
-3. Create `accounts.json` with your Feishu app credentials:
-   ```json
-   {
-     "accounts": {
-       "default": {
-         "appId": "cli_xxx",
-         "appSecret": "xxx",
-         "encryptKey": "xxx",
-         "verificationToken": "xxx",
-         "brand": "feishu",
-         "enabled": true
-       }
-     }
-   }
-   ```
-
-4. Run in development mode:
-   ```bash
-   pnpm dev
-   ```
-
-## Workspace Isolation
-
-Each Feishu account has its own isolated workspace under `ZCLAW_DATA_DIR`:
-
-```
-data/
-├── workspaces/
-│   ├── <accountId_1>/
-│   │   ├── zclaw.db      # per-account SQLite
-│   │   ├── media/        # per-account media cache
-│   │   └── shared/       # symlink to global shared workspace
-│   └── <accountId_2>/
-│       ├── zclaw.db
-│       ├── media/
-│       └── shared/
-└── shared/
-    ├── zclaw.db          # shared SQLite (accounts table, global config)
-    └── media/            # shared media/files
-```
-
-Benefits:
-- Each account's sessions and messages are stored in separate SQLite files
-- Media caches are isolated per account
-- A shared workspace is available for common resources
-- Legacy data (`data/zclaw.db`, `data/media/`) is automatically migrated on startup
-
-## Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `ANTHROPIC_API_KEY` | - | Claude API key |
-| `ANTHROPIC_BASE_URL` | `https://api.anthropic.com` | Claude API base URL (optional, for proxy/edge endpoints) |
-| `CLAUDE_MODEL` | `claude-sonnet-4-7` | Claude model |
-| `CLAUDE_MAX_TOKENS` | `4096` | Max tokens per response |
-| `ZCLAW_DATA_DIR` | `./data` | Data directory |
-| `ZCLAW_SESSION_MAX_MESSAGES` | `20` | Max messages kept per session |
-| `ZCLAW_SESSION_TTL_MS` | `3600000` | Session idle TTL |
-| `ZCLAW_MEDIA_MAX_MB` | `30` | Max inbound media size |
-| `LARK_CLI_PATH` | - | Path to lark-cli binary |
-| `ZCLAW_ACCOUNTS_CONFIG` | `./accounts.json` | Feishu accounts config |
-| `ZCLAW_TASKS_CONFIG` | `./tasks.json` | Scheduled tasks config |
-
-## Claude Tools
-
-ZClaw exposes the following tools to Claude:
-
-- `lark_send_message` — Send a Feishu message
-- `lark_create_doc` — Create a Feishu document
-- `lark_read_doc` — Read a Feishu document (Markdown or XML)
-- `lark_update_doc` — Update a Feishu document (append, overwrite, or str_replace)
-- `lark_create_sheet` — Create a Feishu spreadsheet
-- `lark_read_sheet` — Read cells from a Feishu spreadsheet (JSON or CSV)
-- `lark_update_sheet` — Write values to a Feishu spreadsheet
-- `lark_upload_file` — Upload a file to Feishu Drive
-- `lark_list_chat_members` — List chat members
-- `lark_send_card` — Send an interactive card
-- `lark_update_card` — Update an existing card message
-- `scheduler_list_tasks` — List scheduled tasks (optionally filter by enabled status or workspace)
-- `scheduler_create_task` — Create a new scheduled task
-- `scheduler_update_task` — Update an existing scheduled task
-- `scheduler_delete_task` — Delete a scheduled task by ID
-
-## Card Interactions
-
-Claude can send interactive cards (buttons, forms, confirmations). When a user clicks a button, the event is routed back to Claude as a synthetic message, allowing multi-turn card-based workflows.
-
-## Media Support
-
-Inbound images are converted to Claude `image` content blocks. PDFs are converted to `document` blocks. Plain text files are read as text. Other files are referenced by name.
-
-## Scheduled Tasks
-
-ZClaw supports cron-based scheduled tasks via `tasks.json` and direct management through Claude:
+## 先在本地试运行
 
 ```bash
-cp tasks.json.example tasks.json
+npm ci
+npm run check
+npm run demo
 ```
 
-Supported actions:
+演示模式不需要飞书凭据或模型 Key，不联网调用模型，数据单独存到 `data-demo/`。输入：
 
-- `send_message` — Send a Feishu message
-- `run_lark_cli` — Execute a lark-cli command
-- `invoke_claude` — Invoke Claude and optionally send the result
-- `cleanup_media` — Clean up old media files
-
-Example:
-
-```json
-{
-  "tasks": [
-    {
-      "id": "daily-report",
-      "name": "Daily Report Reminder",
-      "workspaceId": "default",
-      "cron": "0 18 * * 1-5",
-      "enabled": true,
-      "action": {
-        "type": "send_message",
-        "payload": { "chat_id": "oc_xxx", "text": "请记得填写今日日报" }
-      }
-    }
-  ]
-}
+```text
+health /weight 72.3
+health /weights
+health /exercise 30
+health /remind 20:30 该运动了，记得记录今天的运动。
+health /schedule list
+finance 介绍你的职责
+coder /status
+exit
 ```
 
-- `workspaceId` can be `shared` or any account ID from `accounts.json`
-- Tasks are persisted to the workspace's SQLite database
-- On startup, `tasks.json` is synced to the database
-- Tasks created through Claude are marked as `runtime` tasks and are not overwritten or removed by `tasks.json` syncs
-- Use the `scheduler_*` Claude tools to list, create, update, or delete tasks at runtime
+演示 Agent 只返回明确标记的固定文本，不具备自然语言理解；上述命令会真正写数据库和创建计划。运行时到期的提醒会打印到控制台。验证一次性提醒时，用 `/once` 填写未来一分钟的带时区 ISO 时间。
 
-## Multi-Account Configuration
+`npm run smoke` 会在临时目录启动真实应用进程，验证记录、一次性提醒、重启后读回数据和正常退出，不使用你的配置或凭据。
 
-Add multiple accounts to `accounts.json`:
-
-```json
-{
-  "accounts": {
-    "hr_bot": {
-      "appId": "cli_xxx",
-      "appSecret": "xxx",
-      "brand": "feishu",
-      "enabled": true,
-      "agent": {
-        "systemPrompt": "You are an HR assistant. Answer in Chinese.",
-        "model": "claude-sonnet-4-7",
-        "maxTokens": 2048,
-        "enabledTools": ["lark_*"]
-      }
-    },
-    "it_bot": {
-      "appId": "cli_yyy",
-      "appSecret": "yyy",
-      "brand": "feishu",
-      "enabled": true,
-      "agent": {
-        "systemPrompt": "You are an IT support assistant. Answer in English.",
-        "model": "claude-sonnet-4-7",
-        "maxTokens": 4096,
-        "enabledTools": ["lark_*", "scheduler_*"]
-      }
-    }
-  }
-}
-```
-
-Each enabled account gets its own workspace, WebSocket connection, and Claude agent instance. The per-account `agent` field lets you customize the system prompt, model, max tokens, and available tools. If omitted, account falls back to the global environment variables.
-
-`enabledTools` supports exact names and `*` wildcards (e.g. `lark_*` enables all Lark tools).
-
-## CLI Usage
-
-After building or installing globally, `zclaw` is available as a command-line tool.
-
-### Daemon control
+## 配置与启动
 
 ```bash
-# Start in foreground
-zclaw start
-
-# Start as daemon
-zclaw start --daemon
-
-# Check status
-zclaw status
-
-# Restart / stop
-zclaw restart
-zclaw stop
-
-# Upgrade to latest version
-zclaw upgrade
-zclaw upgrade --pm pnpm
+cp config.example.yaml config.yaml
+cp .env.example .env
 ```
 
-### Account management
+编辑 `.env`，填写模型 Key、各飞书应用的 App ID、App Secret、你的 owner open_id。编辑 `config.yaml` 选择模型、人格和目录。默认模型是 Pi 内置目录中的 `anthropic/claude-sonnet-4-5`；你可以使用其他已支持模型，或通过 `modelsFile` 配置兼容接口。
+
+先只启用健康助理也可以：为其他两个 Agent 增加 `enabled: false`。关闭的 Agent 不需要凭据；它的待执行任务和数据保留，重新启用后继续处理。
 
 ```bash
-zclaw account list
-zclaw account add mybot --app-id cli_xxx --app-secret xxx
-zclaw account remove mybot
-zclaw account set-model mybot claude-sonnet-4-7
+npm run build
+npm run doctor
+npm start
 ```
 
-### Scheduled task management
+`doctor` 校验配置、必需凭据是否存在、SDK 能否识别模型；**不验证远端 Key 的有效性或飞书权限**。进程成功启动并不等于每个机器人已连上；查看日志中的 `feishu_connected`。
+
+不接飞书、只测试自己的真实模型时：
 
 ```bash
-zclaw task list
-zclaw task add daily-report \
-  --name "Daily Report" \
-  --cron "0 18 * * 1-5" \
-  --workspace mybot \
-  --action-type send_message \
-  --action-payload '{"chat_id":"oc_xxx","text":"请填写日报"}'
-zclaw task remove daily-report
+npm run chat -- --config config.yaml
 ```
 
-Management commands edit `accounts.json` / `tasks.json`. Run `zclaw restart` to apply changes to a running daemon.
+该模式无需飞书凭据，仍使用 `data-demo/` 保存会话；工具会实际执行，编程助理仍能修改配置的 workspace。需要完全独立的代码实验时，为它配置临时 workspace。
 
-## Logging
+飞书设置详见 [部署说明](docs/DEPLOYMENT.md)，扩展方法见 [扩展说明](docs/EXTENSIONS.md)。
 
-Logs are written to both console and `data/logs/zclaw-YYYY-MM-DD.log`. Set `ZCLAW_LOG_LEVEL` to control verbosity:
+## 日常使用
 
-```bash
-ZCLAW_LOG_LEVEL=debug zclaw start --daemon
+向健康机器人发送自然语言：
+
+```text
+今天早上体重72.3公斤，帮我记录。
+昨天运动了30分钟。
+每天早上8点提醒我称体重。
+每天晚上20:30检查今天的运动记录，没有运动就提醒我。
+每天早上7点半，结合我的目标给我简短的饮食建议。
+列出我的定时任务，把运动提醒改到21点。
+记住，我比较喜欢散步，不喜欢跑步。
 ```
 
-Levels: `debug`, `info` (default), `warn`, `error`.
+自然语言解析依赖所选模型。固定命令不调用模型：
 
-## NPM Publish
+| 命令 | 用途 |
+| --- | --- |
+| `/help` | 所有命令及格式 |
+| `/status` | 当前任务、最近状态、发送失败数 |
+| `/new` | 开新对话，保留记忆、计划和业务数据 |
+| `/stop` | 取消当前任务和当前聊天的等待队列，不暂停未来计划 |
+| `/weight 72.3 [YYYY-MM-DD]` | 按 kg 保存体重，默认今天 |
+| `/weights` | 最近 30 条体重 |
+| `/exercise 30 [YYYY-MM-DD]` | 保存当天累计运动分钟 |
+| `/remind 20:30 内容` | 每天定时发送固定文字 |
+| `/once ISO时间 内容` | 一次性提醒，时间必须包含 Z 或 +08:00 等偏移 |
+| `/schedule list` | 列出当前助理在当前聊天中的计划 |
+| `/schedule pause/resume/delete ID` | 暂停/恢复/删除计划（选择其中一个操作） |
 
-```bash
-pnpm run build
-npm pack --dry-run
-npm publish
+复杂计划可以直接传 JSON：
+
+```text
+/schedule add {"name":"健康日报","cron":"0 21 * * *","timezone":"Asia/Shanghai","action":"agent","prompt":"读取今天体重和运动记录，给出简短总结；没有记录时请说明，不编造。","misfire":"latest"}
 ```
 
-The package exposes the `zclaw` binary and bundles the `lark-cli` binary for macOS x86_64.
+修改：`/schedule update <完整ID> <完整计划JSON>`。`update` 要提供完整新配置，不改变计划原有暂停状态。暂停/删除不取消已经入队的任务；需要时另发 `/stop`。
 
-## Development
+同一天同一种健康记录只有一个值，新的明确记录会替换旧值；运动分钟是**当天累计**，不是每次运动的增量。自然语言工具支持查询、纠正和删除。暂不保留测量版本审计或多次日内测量。
 
-```bash
-# Type check
-pnpm typecheck
+## 数据与运行语义
 
-# Build
-pnpm build
+生产状态存储在 `data/`，包括：
 
-# Run tests
-pnpm test
+- `myclaw.sqlite`：消息去重标记、会话映射、任务、计划、发送队列、健康记录、工具回执。
+- `agents/<id>/memory.md`：该助理的长期记忆。
+- `agents/<id>/sessions/`：Pi 持久会话。
+- `agents/<id>/workspace/`：默认工作目录。
+- `agents/<id>/pi/`：每 Agent 的 SDK 配置/认证状态位置。
 
-# Development mode (hot reload)
-pnpm dev
-```
+人格位于 `agents/<id>/persona.md`，共享资料位于 `shared/`；人格、记忆、共享资料和 Skill 内容在每次执行重新读取，模型和应用配置修改后需重启。
 
-## License
+默认同一 Agent 同时一个任务，整个程序最多两个。普通聊天优先于待执行的后台任务；固定文字提醒直接进入发送队列，不占 Agent 运行名额。
 
-[LICENSE](./LICENSE)
+### 重启、重试与停止
+
+- 已收到并入库但未开始的任务重启后继续；正在执行的任务标记 `interrupted`，告知用户，不自动重跑。
+- 完成后的回复先入 outbox；发送失败只重试回复，不重跑 Agent。
+- 飞书发送使用稳定 UUID。最多自动重试 8 次；若距首次发送尝试已超过 50 分钟，转为人工核对，避免跨越飞书一小时去重窗口盲目重发。它仍不是跨系统的严格 exactly-once。
+- `/stop` 与超时依赖 SDK/工具响应取消。已产生的外部效果不回滚；不能及时取消的工具可能继续占用该 Agent。服务关闭 20 秒后强制退出，systemd 最终终止整个进程组。
+- 工具调用数量限制是 SDK 事件上的运行保护，不是硬预算计费上限。
+- 定时 `skip`：超过 `graceSeconds`（默认 120 秒）的错过触发跳过。`latest`：恢复后至多补最近一次，不回放所有历史时点。
+- 同一计划已有 queued/running 任务时，新的时点跳过，避免积压。其他计划依然可以排队。
+- cron 只表达时间，不代表交易日历。市场节假日/盘中判断应由行情 Skill/工具完成。
+- 单实例：程序用目录锁拒绝共享同一数据目录的第二个实例。异常退出后旧锁可能需要约 30 秒失效，不要运行多个副本。
+
+## 测试与实际验证边界
+
+运行 `npm run check` 构建并测试；`npm run smoke` 做真实进程演示验证。
+
+测试包含消息去重、私聊身份过滤、每 Agent 串行和跨 Agent 并发、取消、时区/夏令时、定时任务管理与去重、恢复策略、回复重试、健康数据和记忆分离。Pi 集成测试实际创建 SDK Session，通过本地 OpenAI 兼容 HTTP/SSE 模拟端点执行健康工具，并验证会话恢复与共享资料更新。
+
+**未用真实飞书应用或付费模型 Key 联调。** 本地模型端点验证了协议与工具执行链路，不代表真实模型的任务完成质量。部署后请先按部署文档的验收步骤验证。所有依赖版本已固定在 `package-lock.json`。
+
+## 边界
+
+这是信任宿主机与操作者的个人应用。工作目录、工具清单和人格提示不构成 OS 隔离；拥有 shell 的助理能以运行账户权限访问文件和网络。外部 Skill 也应视为可执行的受信任扩展。服务没有默认开放的 HTTP 管理接口。
+
+业务数据、会话内容和工具结果是本地明文文件；发送给模型的上下文会进入配置的模型服务。通用日志只记录任务 ID、状态和错误类型，不打印完整聊天、API Key 或 SDK 请求对象。数据没有自动清理，需按自己的保留要求备份和整理。
+
+## 上游参考
+
+- [Pi SDK](https://pi.dev/docs/latest/sdk)
+- [Pi 模型配置](https://pi.dev/docs/latest/models-configuration)
+- [飞书 Node SDK](https://github.com/larksuite/node-sdk)
+- [飞书接收消息事件](https://open.feishu.cn/document/server-docs/im-v1/message/events/receive)
+- [飞书发送消息](https://open.feishu.cn/document/server-docs/im-v1/message/create)
