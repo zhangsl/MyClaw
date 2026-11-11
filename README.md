@@ -60,6 +60,17 @@ cp .env.example .env
 
 编辑 `.env`，填写模型 Key、各飞书应用的 App ID、App Secret、你的 owner open_id。编辑 `config.yaml` 选择模型、人格和目录。默认模型是 Pi 内置目录中的 `anthropic/claude-sonnet-4-5`；你可以使用其他已支持模型，或通过 `modelsFile` 配置兼容接口。
 
+如果还不知道自己的 owner open_id，先填写对应机器人的 App ID 和 App Secret，并暂停正式服务，然后在项目根目录运行：
+
+```bash
+node scripts/identify-owner.mjs health
+# 其他机器人：
+node scripts/identify-owner.mjs finance
+node scripts/identify-owner.mjs coder
+```
+
+在 5 分钟内，把脚本生成的 `pair ...` 文字私聊发给对应机器人。脚本会输出 `HEALTH_OWNER_OPEN_ID=...`（或对应 Agent 的变量），将这一行填入 `.env`。已经配置过时，直接查看 `.env` 中对应的变量即可，无需重复运行。
+
 先只启用健康助理也可以：为其他两个 Agent 增加 `enabled: false`。关闭的 Agent 不需要凭据；它的待执行任务和数据保留，重新启用后继续处理。
 
 ```bash
