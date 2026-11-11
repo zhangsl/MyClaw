@@ -61,6 +61,53 @@ export interface Messenger {
   unreact?(message: Inbound, reactionId: string): Promise<void>;
 }
 
+export interface DocumentReadResult {
+  document_id: string;
+  title: string;
+  revision_id: number | null;
+  content: string;
+  truncated: boolean;
+}
+
+export interface DocumentWriteResult {
+  saved: true;
+  document_id: string;
+  mode: 'append' | 'overwrite';
+  revision_id: number | null;
+  blocks: number;
+}
+
+export interface DocumentService {
+  read(agentId: string, document: string, signal: AbortSignal): Promise<DocumentReadResult>;
+  write(agentId: string, document: string, content: string, mode: 'append' | 'overwrite', signal: AbortSignal, operationId: string): Promise<DocumentWriteResult>;
+}
+
+export type SpreadsheetCell = string | number | boolean | null;
+export interface SpreadsheetReadResult {
+  spreadsheet_token: string;
+  title: string;
+  revision_id: number | null;
+  range: string;
+  values: unknown[][];
+  truncated: boolean;
+  sheets: { sheet_id: string; title: string; index: number | null; rows: number | null; columns: number | null }[];
+}
+
+export interface SpreadsheetWriteResult {
+  saved: true;
+  spreadsheet_token: string;
+  sheet_id: string;
+  mode: 'append' | 'overwrite';
+  range: string;
+  revision_id: number | null;
+  updated_cells: number | null;
+}
+
+export interface SpreadsheetService {
+  read(agentId: string, spreadsheet: string, range: string | undefined, signal: AbortSignal): Promise<SpreadsheetReadResult>;
+  write(agentId: string, spreadsheet: string, range: string | undefined, values: SpreadsheetCell[][], mode: 'append' | 'overwrite', signal: AbortSignal): Promise<SpreadsheetWriteResult>;
+}
+
 export interface EngineRequest {
   run: Run;
   signal: AbortSignal;

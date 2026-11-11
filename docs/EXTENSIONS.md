@@ -37,6 +37,16 @@ Skill 的描述会提供给模型，模型使用 `read` 读取完整说明。若
 
 健康记录是这个扩展模式的现成例子。若要新增技能而不改源码，可先使用现成 Skill 加 bash 脚本；复杂业务写操作更适合做自定义工具。
 
+## 飞书文档与电子表格工具
+
+正式飞书模式下，每个 Agent 通过 `feishu_doc_read` 和 `feishu_doc_write` 使用自己应用的凭据访问新版 docx 文档。参数接受 docx 链接、指向 docx 的 Wiki 链接或 document_id；控制台和演示模式不注册这些工具。读取返回纯文本，超过 100,000 个字符时标记截断；写入接受最多 100,000 个字符的 Markdown。
+
+文档写入默认 `append`，`overwrite` 用于用户明确要求替换全文的场景。覆盖先追加转换后的新块，再删除旧块，不是飞书侧事务：若中途失败，原文和一部分新内容可能同时存在，模型会收到失败而不是成功。`client_token` 与本地工具回执共同减少重放造成的重复写入，但跨系统仍不保证严格 exactly-once。
+
+文档支持标题、列表、代码块和表格等飞书转换接口支持的格式；图片需改为链接，旧版 doc 不在支持范围内。Wiki 链接会先解析节点类型和实际 docx ID，非 docx 节点会被拒绝。`src/feishu-documents.ts` 封装链接校验、Wiki 节点解析、API 调用、文档版本和大内容分批。
+
+电子表格使用 `feishu_sheet_read` 和 `feishu_sheet_write`，支持 sheets 链接、指向电子表格的 Wiki 链接或 spreadsheet_token。读取可指定 `工作表ID!A1:Z100` 范围，省略时读取首个可见工作表的 A1:Z100，并返回所有工作表 ID；返回值最多约 100,000 个字符。写入使用二维数组，默认追加行并通过 `INSERT_ROWS` 避免覆盖已有数据；`overwrite` 必须明确指定范围。本地回执避免成功调用的工具重放，但 Sheets API 没有本实现可用的写入幂等令牌，含糊失败后仍应先检查表格。`src/feishu-sheets.ts` 使用 Sheets v3 元数据接口和 v2 单元格数据接口。
+
 ## 自定义模型接口
 
 在配置中指定 `modelsFile: ./models.json`，例如：
@@ -84,6 +94,8 @@ model:
 | main.ts | 初始化、单实例锁、控制台/飞书模式、退出 |
 | config.ts | YAML 校验、目录、凭据引用 |
 | feishu.ts | 飞书身份/消息过滤、长连接和发送 |
+| feishu-documents.ts | 新版 docx 读取、Markdown 转换、追加与覆盖 |
+| feishu-sheets.ts | 电子表格区域读取、追加与指定区域覆盖 |
 | dispatcher.ts | 命令、串行/并行队列、取消、结果投递 |
 | scheduler.ts | 时间解析、计划管理、到期触发 |
 | agent.ts | Pi Session、模型、资源及事件桥接 |

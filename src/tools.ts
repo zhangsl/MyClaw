@@ -26,11 +26,25 @@ export function makeTools(agent: AgentConfig, run: Run, services: Services, sign
     { name: 'health_query', description: '读取最近的体重或运动记录，按日期倒序。', parameters: Type.Object({ kind: Type.Union([Type.Literal('weight'), Type.Literal('exercise')]), limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 366 })) }) },
     { name: 'health_delete', description: '删除用户明确要求删除的某日健康记录。', parameters: Type.Object({ kind: Type.Union([Type.Literal('weight'), Type.Literal('exercise')]), day: Type.String() }) },
   );
+  if (services.documents) definitions.push(
+    { name: 'feishu_doc_read', description: '读取新版飞书 docx 文档纯文本。document 为 docx 链接、指向 docx 的 Wiki 链接或 document_id；不支持旧版 doc、表格或多维表格。', parameters: Type.Object({ document: Type.String({ minLength: 1, maxLength: 2048 }) }) },
+    { name: 'feishu_doc_write', description: '向新版飞书 docx 文档写入 Markdown，保留标题、列表、代码块和表格，不支持图片。mode 默认 append 追加；overwrite 会替换全文，只有用户明确要求覆盖时才可使用。document 为 docx 链接、指向 docx 的 Wiki 链接或 document_id。', parameters: Type.Object({ document: Type.String({ minLength: 1, maxLength: 2048 }), content: Type.String({ minLength: 1, maxLength: 100000 }), mode: Type.Optional(Type.Union([Type.Literal('append'), Type.Literal('overwrite')])) }) },
+  );
+  const sheetCell = Type.Union([Type.String(), Type.Number(), Type.Boolean(), Type.Null()]);
+  const sheetRange = Type.String({ minLength: 3, maxLength: 256, pattern: '^[A-Za-z0-9_-]+![A-Z]{1,3}[0-9]+(:[A-Z]{1,3}[0-9]+)?$' });
+  if (services.spreadsheets) definitions.push(
+    { name: 'feishu_sheet_read', description: '读取飞书电子表格。spreadsheet 为 sheets 链接、指向电子表格的 Wiki 链接或 spreadsheet_token。range 可选，格式为 工作表ID!A1:Z100；省略时读取首个可见工作表的 A1:Z100，并返回所有工作表 ID。', parameters: Type.Object({ spreadsheet: Type.String({ minLength: 1, maxLength: 2048 }), range: Type.Optional(sheetRange) }) },
+    { name: 'feishu_sheet_write', description: '写入飞书电子表格，values 是二维数组（每行一个数组，单元格为字符串、数字、布尔值或 null）。mode 默认 append，在首个可见工作表追加行；range 可指定工作表和区域。overwrite 只覆盖明确指定的 range，必须提供 range，只有用户明确要求覆盖时才可使用。', parameters: Type.Object({ spreadsheet: Type.String({ minLength: 1, maxLength: 2048 }), range: Type.Optional(sheetRange), values: Type.Array(Type.Array(sheetCell, { minItems: 1, maxItems: 100 }), { minItems: 1, maxItems: 5000 }), mode: Type.Optional(Type.Union([Type.Literal('append'), Type.Literal('overwrite')])) }) },
+  );
   return definitions.map(d => ({
     ...d, label: d.name,
     async execute(callId, args) {
       signal.throwIfAborted();
-      const result = services.call(agent, run, d.name, args, callId);
+      const result = d.name.startsWith('feishu_doc_')
+        ? await services.callDocument(agent, run, d.name, args, callId, signal)
+        : d.name.startsWith('feishu_sheet_')
+          ? await services.callSpreadsheet(agent, run, d.name, args, callId, signal)
+          : services.call(agent, run, d.name, args, callId);
       return { content: [{ type: 'text' as const, text: JSON.stringify(result) }], details: {} };
     },
   }));

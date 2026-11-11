@@ -3,6 +3,8 @@ import { z } from 'zod';
 import type { Config } from './config.js';
 import type { Inbound, Messenger, Outbound } from './types.js';
 import { log } from './util.js';
+import { FeishuDocuments } from './feishu-documents.js';
+import { FeishuSheets } from './feishu-sheets.js';
 
 const eventSchema = z.object({
   sender: z.object({ sender_type: z.string(), sender_id: z.object({ open_id: z.string() }) }),
@@ -25,6 +27,8 @@ export function parseFeishuEvent(agentId: string, ownerId: string, event: unknow
 export class FeishuGateway implements Messenger {
   private clients = new Map<string, lark.Client>();
   private sockets: lark.WSClient[] = [];
+  readonly documents: FeishuDocuments;
+  readonly spreadsheets: FeishuSheets;
   constructor(private config: Config) {
     lark.defaultHttpInstance.defaults.timeout = 15_000;
     for (const agent of config.agents) {
@@ -33,6 +37,13 @@ export class FeishuGateway implements Messenger {
         appType: lark.AppType.SelfBuild, domain: lark.Domain.Feishu, logger: this.logger(agent.id),
       }));
     }
+    const clientFor = (agentId: string) => {
+      const client = this.clients.get(agentId);
+      if (!client) throw new Error('Agent 未启用');
+      return client;
+    };
+    this.documents = new FeishuDocuments(config, clientFor);
+    this.spreadsheets = new FeishuSheets(config, clientFor);
   }
   private logger(agent: string) {
     return {

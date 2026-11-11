@@ -61,6 +61,8 @@ export class PiEngine implements Engine {
       `私有记忆:\n${this.services.memory(agent)}`,
       `共享知识:\n${shared || '无'}`,
       '定时任务必须调用 schedule 工具保存，不要仅在回复中承诺。简单提醒使用 reminder，需推理或工具的任务使用 agent。',
+      this.services.documents ? '读写飞书文档必须使用 feishu_doc_read / feishu_doc_write，支持 docx 链接和指向 docx 的 Wiki 链接。写入默认追加；只有用户明确要求替换全文时才使用 overwrite，不要对旧版 doc 或非 docx 的 Wiki 节点宣称写入成功。' : '',
+      this.services.spreadsheets ? '读写飞书电子表格必须使用 feishu_sheet_read / feishu_sheet_write，支持 sheets 链接和指向电子表格的 Wiki 链接。写入默认追加；覆盖必须明确指定 range。先用读取结果中的工作表 ID 构造 range，不要把工作表标题当 ID。' : '',
       '用户询问最近的定时报告或执行结果时使用 recent_runs。除非用户要求更新计划，后台任务不能自行创建重复计划。',
       '健康记录只来自用户明确提供的数据。记录单位为公斤或当天累计运动分钟；有歧义先提问。',
       '将最终需要发送给用户的内容放在最后回复中。后台检查无需通知时，最终回复必须恰好为 [NO_REPLY]。',

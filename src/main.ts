@@ -24,8 +24,6 @@ async function main() {
   const release = await lockfile.lock(config.dataDir, { retries: 0, stale: 30_000, update: 10_000 });
   const store = new Store(join(config.dataDir, 'myclaw.sqlite'));
   const scheduler = new Scheduler(store, config.agents.map(a => a.id));
-  const services = new Services(store, scheduler, config.timezone);
-  const engine = demo ? new DemoEngine() : new PiEngine(config, services);
   let gateway: FeishuGateway | undefined;
   let dispatcher: Dispatcher | undefined;
   let timer: NodeJS.Timeout | undefined;
@@ -42,12 +40,14 @@ async function main() {
     finally { clearTimeout(hardStop); }
   };
   try {
+    gateway = local ? undefined : new FeishuGateway(config);
+    const services = new Services(store, scheduler, config.timezone, gateway?.documents, gateway?.spreadsheets);
+    const engine = demo ? new DemoEngine() : new PiEngine(config, services);
     if (engine instanceof PiEngine) await engine.checkModels();
     if (args.includes('--check')) {
       log('configuration_valid', { agents: config.agents.map(a => a.id), model: demo ? 'mock' : 'pi', transport: local ? 'console' : 'feishu' });
       await shutdown(); return;
     }
-    gateway = local ? undefined : new FeishuGateway(config);
     dispatcher = new Dispatcher(config, store, scheduler, engine, gateway ?? new ConsoleMessenger());
     const recovered = store.recover();
     log('started', { agents: config.agents.map(a => a.id), mode: demo ? 'demo' : local ? 'console' : 'feishu', recovered });
