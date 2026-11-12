@@ -16,6 +16,25 @@ const eventSchema = z.object({
   message: z.object({ message_id: z.string(), chat_id: z.string(), chat_type: z.string(), message_type: z.string(), content: z.string() }),
 });
 
+function parsePost(content: unknown): { text: string; images: { kind: 'image'; key: string; name: string }[] } {
+  const post = z.object({
+    title: z.string().optional(),
+    content: z.array(z.array(z.object({ tag: z.string(), text: z.string().optional(), href: z.string().optional(), name: z.string().optional(), image_key: z.string().optional() }).passthrough())),
+  }).parse(content);
+  const images: { kind: 'image'; key: string; name: string }[] = [];
+  const paragraphs = post.content.map(paragraph => {
+    const text = paragraph.map(part => {
+      if (part.tag === 'img' && part.image_key) { images.push({ kind: 'image', key: part.image_key, name: `image-${images.length + 1}` }); return ''; }
+      if (part.tag === 'a') return part.href && part.text !== part.href ? `${part.text ?? ''} ${part.href}` : part.text ?? part.href ?? '';
+      if (part.tag === 'at') return part.name ?? part.text ?? '';
+      return part.text ?? '';
+    }).join('');
+    return text;
+  });
+  const text = [post.title ?? '', ...paragraphs].filter(part => part.trim()).join('\n');
+  return { text: text || (images.length ? '请查看并处理富文本中的图片。' : '/unsupported'), images };
+}
+
 export function parseFeishuEvent(agentId: string, ownerId: string, event: unknown): Inbound | null {
   const result = eventSchema.safeParse(event);
   if (!result.success) return null;
@@ -28,6 +47,11 @@ export function parseFeishuEvent(agentId: string, ownerId: string, event: unknow
   try {
     const content: unknown = JSON.parse(message.content);
     if (message.message_type === 'text') inbound.text = z.object({ text: z.string() }).parse(content).text;
+    if (message.message_type === 'post') {
+      const post = parsePost(content);
+      inbound.text = post.text;
+      if (post.images.length) inbound.resources = post.images;
+    }
     if (message.message_type === 'image') {
       const image = z.object({ image_key: z.string().min(1) }).parse(content);
       inbound.text = '请查看并处理这张图片。';

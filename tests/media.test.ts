@@ -24,6 +24,11 @@ test('Feishu parses image, audio and file resources without weakening owner chec
   const file = parseFeishuEvent('health', 'owner', mediaEvent('file', { file_key: 'file-key', file_name: 'report.pdf' }))!;
   assert.equal(file.resources?.[0].name, 'report.pdf');
   assert.equal(parseFeishuEvent('health', 'other', mediaEvent('file', { file_key: 'file-key' })), null);
+  const post = parseFeishuEvent('health', 'owner', mediaEvent('post', {
+    title: '标题', content: [[{ tag: 'text', text: '你好' }, { tag: 'a', text: '链接', href: 'https://example.com' }], [{ tag: 'img', image_key: 'post-image' }]],
+  }))!;
+  assert.equal(post.text, '标题\n你好链接 https://example.com');
+  assert.equal(post.resources?.[0].key, 'post-image');
   assert.equal(parseFeishuEvent('health', 'owner', mediaEvent('video', { file_key: 'video-key' }))?.text, '/unsupported');
 });
 
