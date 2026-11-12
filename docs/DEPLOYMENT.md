@@ -21,17 +21,18 @@ sudo chmod 600 .env config.yaml
 
 ## 2. 创建飞书应用
 
-为三个助理分别创建企业自建应用，分别开启机器人能力。第一轮可只启用 health。
+为每个要启用的助理分别创建企业自建应用，分别开启机器人能力。第一轮可只启用 health。
 
 每个应用：
 
 1. 记录 App ID 和 App Secret，填入 `.env` 对应变量。
-2. 开通读取用户发给机器人的单聊消息 `im:message.p2p_msg:readonly` 和以应用身份发消息 `im:message:send_as_bot`；以后台当前权限提示为准。
-3. 如需读取文档，开通 `docx:document:readonly`；如需追加或覆盖文档，开通 `docx:document`。电子表格读取使用 `sheets:spreadsheet:readonly`，写入使用 `sheets:spreadsheet`。如需通过 Wiki 链接访问文档或电子表格节点，再开通 `wiki:wiki:readonly`。权限名称以当前开放平台为准。
-4. 事件订阅选择长连接，订阅 `im.message.receive_v1`。若后台要求先建立连接，先启动下一步的身份识别脚本，再回后台保存订阅。
-5. 发布应用版本，使用范围包括你本人。首次发布或权限变更可能需要管理员审核。
-6. 在飞书找到机器人并发起私聊。
-7. 把需要访问的新版 docx 文档或电子表格共享给对应应用，读取授予可阅读权限，写入授予可编辑权限。仅开通 API 权限但没有文档协作权限仍会返回权限错误。
+2. 开通读取用户发给机器人的单聊消息 `im:message.p2p_msg:readonly` 和以应用身份发消息 `im:message:send_as_bot`，用于文字、图片、语音和文件消息及资源下载；以后台当前权限提示为准。
+3. 语音转写在本机使用 FFmpeg + faster-whisper，不需要飞书 ASR 权限；按 README 安装 `ffmpeg`、`python3-venv` 和 `requirements-asr.txt`，并确保运行账户能读取模型缓存。
+4. 如需读取文档，开通 `docx:document:readonly`；如需追加或覆盖文档，开通 `docx:document`。电子表格读取使用 `sheets:spreadsheet:readonly`，写入使用 `sheets:spreadsheet`。如需通过 Wiki 链接访问文档或电子表格节点，再开通 `wiki:wiki:readonly`。权限名称以当前开放平台为准。
+5. 事件订阅选择长连接，订阅 `im.message.receive_v1`。若后台要求先建立连接，先启动下一步的身份识别脚本，再回后台保存订阅。
+6. 发布应用版本，使用范围包括你本人。首次发布或权限变更可能需要管理员审核。
+7. 在飞书找到机器人并发起私聊。
+8. 把需要访问的新版 docx 文档或电子表格共享给对应应用，读取授予可阅读权限，写入授予可编辑权限。仅开通 API 权限但没有文档协作权限仍会返回权限错误。
 
 这是有 App ID/Secret 的应用机器人，**不是群聊自定义 Webhook 机器人**。
 
@@ -51,6 +52,7 @@ sudo -u myclaw node scripts/identify-owner.mjs health
 ```bash
 sudo -u myclaw node scripts/identify-owner.mjs finance
 sudo -u myclaw node scripts/identify-owner.mjs coder
+sudo -u myclaw node scripts/identify-owner.mjs joy
 ```
 
 识别脚本和正式服务不要同时连接同一应用；长连接推送不是广播。
@@ -77,7 +79,8 @@ sudo -u myclaw npm start
 7. 在 coder 要求在工作区创建一个测试文件，再检查真实文件。
 8. 用一篇可编辑的测试 docx 文档验证读取、追加和读回；覆盖测试只在可丢弃文档上进行，并检查格式与最终内容。
 9. 用一个可编辑的测试电子表格验证区域读取、追加和读回；指定区域覆盖只在可丢弃表格上进行。
-10. 正常停止并重启程序，确认健康记录、计划和多轮对话仍然存在。
+10. 分别发送一张测试图片、一条 60 秒以内语音和一个小文件，确认下载、转写/理解和本地保存；再让 Agent 生成并回传一个测试文件。语音条另用已有时长的 OPUS/Ogg 文件验证，MP3 不能直接当语音条。
+11. 正常停止并重启程序，确认健康记录、计划、多轮对话和已下载附件仍然存在。
 
 默认不自动创建任何日程，避免在你尚未选定时间和内容时就发送提醒。
 

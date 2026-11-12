@@ -39,7 +39,11 @@ export class Dispatcher {
       try {
         const text = message.text.trim();
         if (!text) return;
-        if (text === '/unsupported') return reply('首版只接收文字消息。请直接发送体重数值或任务描述；图片、语音和附件暂不解析。');
+        if (text === '/unsupported') return reply('暂不支持这种消息。可发送文字、图片、语音或普通文件；暂不支持合并转发、卡片内附件和表情资源。');
+        if (text === '/media-download-failed') return reply('附件下载失败或超过大小限制。图片最大 10 MB，语音和文件最大 30 MB，请重试。');
+        if (text === '/audio-too-long') return reply('语音已超过 60 秒，当前无法转写；请缩短语音，或将音频作为文件发送。');
+        if (text === '/audio-empty') return reply('没有识别出语音内容，请重试或改用文字。');
+        if (text === '/audio-transcribe-failed') return reply('本地语音转写失败。请检查 FFmpeg、faster-whisper 和模型安装，或改用文字。');
         if (text === '/help') return reply(HELP);
         if (text === '/status') {
           const active = this.store.active(agent.id).filter(r => r.chat_id === message.chatId);
@@ -104,7 +108,7 @@ export class Dispatcher {
         }
         if (text.startsWith('/')) return reply('未知命令或消息过长。输入 /help 查看用法。');
         if (this.store.active(agent.id).length >= this.config.maxQueuedPerAgent) return reply('此助理的等待队列已满，请稍后再发。');
-        runId = this.store.enqueue(agent.id, message.chatId, `message:${message.messageId}`, text);
+        runId = this.store.enqueue(agent.id, message.chatId, `message:${message.messageId}`, text, 'chat', Date.now(), message.attachments ?? []);
       } catch (error) {
         // User-facing command validation only; never print raw SDK errors or credentials.
         const reason = error instanceof SyntaxError ? 'JSON 格式不正确' : error instanceof Error ? error.message : '参数错误';

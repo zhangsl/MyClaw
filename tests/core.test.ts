@@ -14,7 +14,7 @@ test('Feishu accepts only the configured owner in private text chats', () => {
   assert.equal(parseFeishuEvent('health', 'someone-else', event), null);
   assert.equal(parseFeishuEvent('health', 'owner', { ...event, message: { ...event.message, chat_type: 'group' } }), null);
   assert.equal(parseFeishuEvent('health', 'owner', { ...event, sender: { ...event.sender, sender_type: 'app' } }), null);
-  assert.equal(parseFeishuEvent('health', 'owner', { ...event, message: { ...event.message, message_type: 'image' } })?.text, '/unsupported');
+  assert.equal(parseFeishuEvent('health', 'owner', { ...event, message: { ...event.message, message_type: 'image', content: JSON.stringify({ image_key: 'img' }) } })?.resources?.[0].key, 'img');
   assert.equal(parseFeishuEvent('health', 'owner', { bad: 'input' }), null);
 });
 

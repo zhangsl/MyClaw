@@ -47,6 +47,12 @@ Skill 的描述会提供给模型，模型使用 `read` 读取完整说明。若
 
 电子表格使用 `feishu_sheet_read` 和 `feishu_sheet_write`，支持 sheets 链接、指向电子表格的 Wiki 链接或 spreadsheet_token。读取可指定 `工作表ID!A1:Z100` 范围，省略时读取首个可见工作表的 A1:Z100，并返回所有工作表 ID；返回值最多约 100,000 个字符。写入使用二维数组，默认追加行并通过 `INSERT_ROWS` 避免覆盖已有数据；`overwrite` 必须明确指定范围。本地回执避免成功调用的工具重放，但 Sheets API 没有本实现可用的写入幂等令牌，含糊失败后仍应先检查表格。`src/feishu-sheets.ts` 使用 Sheets v3 元数据接口和 v2 单元格数据接口。
 
+## 多媒体消息
+
+`src/feishu.ts` 负责独立图片、语音和文件事件的资源解析与下载，以及上传和发送。附件保存到 `data/agents/<id>/attachments/incoming/`，任务和 outbox 只保存路径及元数据。语音由 `src/speech.ts` 调用 `scripts/transcribe.py`，先用 FFmpeg 转为 16 kHz 单声道 WAV，再用 faster-whisper 本地转写，单次不超过 60 秒；图片是否直接传入模型取决于模型目录中的 `input` 是否包含 `image`。
+
+Agent 使用 `send_media` 将工作区或接收附件目录内的本地文件加入发送队列。`src/services.ts` 校验真实路径、文件类型和大小，防止通过 `../` 或符号链接外发其他文件。语音条要求 OPUS/Ogg 和毫秒时长；普通音频以 `file` 类型发送。多媒体投递沿用稳定 UUID、顺序和失败重试，不会重跑 Agent。
+
 ## 自定义模型接口
 
 在配置中指定 `modelsFile: ./models.json`，例如：

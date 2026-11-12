@@ -1,12 +1,14 @@
 import { DatabaseSync } from 'node:sqlite';
 import { id, splitText, validDay } from './util.js';
-import type { Inbound, Outbound, Run, RunStatus, Schedule } from './types.js';
+import type { Attachment, Inbound, MediaKind, Outbound, Run, RunStatus, Schedule } from './types.js';
+
+type RunRow = Omit<Run, 'attachments'> & { attachments: string };
 
 export class Store {
   readonly db: DatabaseSync;
   constructor(path: string) {
     this.db = new DatabaseSync(path);
-    if ((this.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version > 3) throw new Error('数据库版本比当前程序新，请升级程序');
+    if ((this.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version > 4) throw new Error('数据库版本比当前程序新，请升级程序');
     this.db.exec(`
       PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON;
       CREATE TABLE IF NOT EXISTS inbox (
@@ -19,7 +21,7 @@ export class Store {
         id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, chat_id TEXT NOT NULL, session_key TEXT NOT NULL,
         source_key TEXT NOT NULL, kind TEXT NOT NULL, input TEXT NOT NULL, status TEXT NOT NULL,
         created_at INTEGER NOT NULL, started_at INTEGER, finished_at INTEGER, result TEXT, error TEXT, sdk_session TEXT,
-        UNIQUE(agent_id, source_key));
+        attachments TEXT NOT NULL DEFAULT '[]', UNIQUE(agent_id, source_key));
       CREATE INDEX IF NOT EXISTS runs_queue ON runs(status, created_at);
       CREATE TABLE IF NOT EXISTS schedules (
         id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, chat_id TEXT NOT NULL, name TEXT NOT NULL,
@@ -30,7 +32,8 @@ export class Store {
       CREATE TABLE IF NOT EXISTS outbox (
         id TEXT PRIMARY KEY, dedup TEXT UNIQUE NOT NULL, agent_id TEXT NOT NULL, chat_id TEXT NOT NULL,
         text TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, next_at INTEGER NOT NULL,
-        status TEXT NOT NULL DEFAULT 'pending', remote_id TEXT, error TEXT, first_attempt_at INTEGER, run_id TEXT);
+        status TEXT NOT NULL DEFAULT 'pending', remote_id TEXT, error TEXT, first_attempt_at INTEGER, run_id TEXT,
+        kind TEXT NOT NULL DEFAULT 'text', file_path TEXT, file_name TEXT, mime_type TEXT, duration_ms INTEGER);
       CREATE TABLE IF NOT EXISTS health_records (
         agent_id TEXT NOT NULL, kind TEXT NOT NULL, day TEXT NOT NULL, value REAL NOT NULL,
         note TEXT NOT NULL, source TEXT NOT NULL, updated_at INTEGER NOT NULL,
@@ -39,10 +42,16 @@ export class Store {
         run_id TEXT NOT NULL, call_id TEXT NOT NULL, result TEXT NOT NULL,
         PRIMARY KEY(run_id, call_id));
     `);
+    const runColumns = this.db.prepare('PRAGMA table_info(runs)').all() as { name: string }[];
+    if (!runColumns.some(c => c.name === 'attachments')) this.db.exec("ALTER TABLE runs ADD COLUMN attachments TEXT NOT NULL DEFAULT '[]'");
     const columns = this.db.prepare('PRAGMA table_info(outbox)').all() as { name: string }[];
     if (!columns.some(c => c.name === 'first_attempt_at')) this.db.exec('ALTER TABLE outbox ADD COLUMN first_attempt_at INTEGER');
     if (!columns.some(c => c.name === 'run_id')) this.db.exec('ALTER TABLE outbox ADD COLUMN run_id TEXT');
-    this.db.exec('PRAGMA user_version=3');
+    if (!columns.some(c => c.name === 'kind')) this.db.exec("ALTER TABLE outbox ADD COLUMN kind TEXT NOT NULL DEFAULT 'text'");
+    for (const [name, type] of [['file_path', 'TEXT'], ['file_name', 'TEXT'], ['mime_type', 'TEXT'], ['duration_ms', 'INTEGER']]) {
+      if (!columns.some(c => c.name === name)) this.db.exec(`ALTER TABLE outbox ADD COLUMN ${name} ${type}`);
+    }
+    this.db.exec('PRAGMA user_version=4');
   }
 
   transaction<T>(fn: () => T): T {
@@ -73,21 +82,26 @@ export class Store {
       .run(path, run.agent_id, run.chat_id, run.session_key);
   }
 
-  enqueue(agentId: string, chatId: string, source: string, input: string, kind: Run['kind'] = 'chat', now = Date.now()): string {
+  enqueue(agentId: string, chatId: string, source: string, input: string, kind: Run['kind'] = 'chat', now = Date.now(), attachments: Attachment[] = []): string {
     const runId = id();
     const key = kind === 'chat' ? this.session(agentId, chatId).session_key : id();
-    this.db.prepare(`INSERT OR IGNORE INTO runs(id,agent_id,chat_id,session_key,source_key,kind,input,status,created_at)
-      VALUES(?,?,?,?,?,?,?,'queued',?)`).run(runId, agentId, chatId, key, source, kind, input, now);
+    this.db.prepare(`INSERT OR IGNORE INTO runs(id,agent_id,chat_id,session_key,source_key,kind,input,status,created_at,attachments)
+      VALUES(?,?,?,?,?,?,?,'queued',?,?)`).run(runId, agentId, chatId, key, source, kind, input, now, JSON.stringify(attachments));
     return (this.db.prepare('SELECT id FROM runs WHERE agent_id=? AND source_key=?').get(agentId, source) as { id: string }).id;
+  }
+
+  private hydrate(row: RunRow | undefined): Run | undefined {
+    return row ? { ...row, attachments: JSON.parse(row.attachments) as Attachment[] } : undefined;
   }
 
   claim(excludedAgents: string[], now = Date.now(), allowedAgents?: string[]): Run | undefined {
     const slots = excludedAgents.map(() => '?').join(',');
     const allowed = allowedAgents?.map(() => '?').join(',');
     if (allowedAgents && !allowedAgents.length) return;
-    const run = this.db.prepare(`SELECT * FROM runs WHERE status='queued' ${slots ? `AND agent_id NOT IN (${slots})` : ''}
+    const row = this.db.prepare(`SELECT * FROM runs WHERE status='queued' ${slots ? `AND agent_id NOT IN (${slots})` : ''}
       ${allowed ? `AND agent_id IN (${allowed})` : ''}
-      ORDER BY CASE kind WHEN 'chat' THEN 0 ELSE 1 END,created_at,rowid LIMIT 1`).get(...excludedAgents, ...(allowedAgents ?? [])) as Run | undefined;
+      ORDER BY CASE kind WHEN 'chat' THEN 0 ELSE 1 END,created_at,rowid LIMIT 1`).get(...excludedAgents, ...(allowedAgents ?? [])) as RunRow | undefined;
+    const run = this.hydrate(row);
     if (!run) return;
     this.db.prepare("UPDATE runs SET status='running',started_at=? WHERE id=?").run(now, run.id);
     // Resolve at execution time: a previous queued chat may have created the SDK session.
@@ -101,16 +115,26 @@ export class Store {
       .run(status, result, error, Date.now(), runId);
   }
 
-  run(runId: string): Run | undefined { return this.db.prepare('SELECT * FROM runs WHERE id=?').get(runId) as Run | undefined; }
-  active(agentId: string): Run[] { return this.db.prepare("SELECT * FROM runs WHERE agent_id=? AND status IN ('queued','running') ORDER BY created_at").all(agentId) as unknown as Run[]; }
+  run(runId: string): Run | undefined { return this.hydrate(this.db.prepare('SELECT * FROM runs WHERE id=?').get(runId) as RunRow | undefined); }
+  active(agentId: string): Run[] {
+    const rows = this.db.prepare("SELECT * FROM runs WHERE agent_id=? AND status IN ('queued','running') ORDER BY created_at").all(agentId) as unknown as RunRow[];
+    return rows.map(row => this.hydrate(row)!);
+  }
   recent(agentId: string, chatId: string): Run[] {
-    return this.db.prepare('SELECT * FROM runs WHERE agent_id=? AND chat_id=? ORDER BY created_at DESC,rowid DESC LIMIT 10')
-      .all(agentId, chatId) as unknown as Run[];
+    const rows = this.db.prepare('SELECT * FROM runs WHERE agent_id=? AND chat_id=? ORDER BY created_at DESC,rowid DESC LIMIT 10')
+      .all(agentId, chatId) as unknown as RunRow[];
+    return rows.map(row => this.hydrate(row)!);
   }
 
   queueReply(agentId: string, chatId: string, text: string, dedup: string, now = Date.now(), runId: string | null = null): void {
     splitText(text).forEach((chunk, i) => this.db.prepare('INSERT OR IGNORE INTO outbox(id,dedup,agent_id,chat_id,text,next_at,run_id) VALUES(?,?,?,?,?,?,?)')
       .run(id(), `${dedup}:${i}`, agentId, chatId, chunk, now, runId));
+  }
+  queueMedia(agentId: string, chatId: string, kind: MediaKind, path: string, name: string, mimeType: string, dedup: string, runId: string, durationMs?: number): string {
+    const messageId = id();
+    this.db.prepare(`INSERT OR IGNORE INTO outbox(id,dedup,agent_id,chat_id,text,next_at,run_id,kind,file_path,file_name,mime_type,duration_ms)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`).run(messageId, dedup, agentId, chatId, '', Date.now(), runId, kind, path, name, mimeType, durationMs ?? null);
+    return (this.db.prepare('SELECT id FROM outbox WHERE dedup=?').get(dedup) as { id: string }).id;
   }
   pending(now = Date.now()): Outbound[] {
     // Preserve message/chunk ordering within a chat; other bots are not held up.
@@ -146,8 +170,9 @@ export class Store {
 
   recover(): number {
     return this.transaction(() => {
-      const runs = this.db.prepare("SELECT * FROM runs WHERE status='running'").all() as unknown as Run[];
-      for (const run of runs) {
+      const runs = this.db.prepare("SELECT * FROM runs WHERE status='running'").all() as unknown as RunRow[];
+      for (const row of runs) {
+        const run = this.hydrate(row)!;
         this.finish(run.id, 'interrupted', null, 'process_restarted');
         this.queueReply(run.agent_id, run.chat_id, `任务 ${run.id.slice(0, 8)} 因服务重启而中断。已执行的操作不会撤销；请检查后告诉我如何继续。`, `interrupted:${run.id}`);
       }

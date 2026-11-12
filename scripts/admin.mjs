@@ -18,7 +18,7 @@ const release = await lockfile.lock(directory, { retries: 0 });
 const store = new Store(join(directory, 'myclaw.sqlite'));
 try {
   if (command === 'failed') {
-    console.log(JSON.stringify(store.db.prepare("SELECT id,agent_id,chat_id,text,attempts,error FROM outbox WHERE status='failed' ORDER BY rowid").all(), null, 2));
+    console.log(JSON.stringify(store.db.prepare("SELECT id,agent_id,chat_id,kind,file_name,text,attempts,error FROM outbox WHERE status='failed' ORDER BY rowid").all(), null, 2));
   } else {
     if (!target) throw new Error('缺少 outbox-id');
     const result = store.db.prepare("UPDATE outbox SET status='pending',attempts=0,next_at=0,first_attempt_at=NULL,error=NULL WHERE id=? AND status='failed'").run(target);

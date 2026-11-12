@@ -1,9 +1,30 @@
+export type MediaKind = 'image' | 'audio' | 'file';
+
+export interface MediaResource {
+  kind: MediaKind;
+  key: string;
+  name?: string;
+  durationMs?: number;
+}
+
+export interface Attachment {
+  kind: MediaKind;
+  name: string;
+  path: string;
+  mimeType: string;
+  size: number;
+  durationMs?: number;
+  transcript?: string;
+}
+
 export interface Inbound {
   agentId: string;
   messageId: string;
   chatId: string;
   senderId: string;
   text: string;
+  resources?: MediaResource[];
+  attachments?: Attachment[];
 }
 
 export type RunStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'interrupted';
@@ -22,6 +43,7 @@ export interface Run {
   result: string | null;
   error: string | null;
   sdk_session: string | null;
+  attachments: Attachment[];
 }
 
 export interface Schedule {
@@ -53,6 +75,11 @@ export interface Outbound {
   error: string | null;
   first_attempt_at: number | null;
   run_id: string | null;
+  kind: 'text' | MediaKind;
+  file_path: string | null;
+  file_name: string | null;
+  mime_type: string | null;
+  duration_ms: number | null;
 }
 
 export interface Messenger {

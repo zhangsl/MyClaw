@@ -4,7 +4,7 @@
 
 ## 已实现
 
-- 健康、财务、编程三个助理模板；可增减 Agent，每个绑定独立飞书应用。
+- 健康、财务、编程、私人助理四个模板；私人助理可陪练英语和处理日常事务。可增减 Agent，每个绑定独立飞书应用。
 - 个人私聊与按应用配置的 owner open_id 白名单。
 - 每个 Agent 的人格、工作目录、SDK 会话和长期记忆分开；共享资料显式配置、每次运行重新加载。
 - Pi SDK 的真实模型调用、工具执行、历史会话恢复与自动上下文压缩。
@@ -13,11 +13,12 @@
 - cron（五段、最小一分钟）和一次性时间，明确时区，错过执行策略、同一计划不积压并发实例。
 - 体重与每日累计运动分钟的结构化记录、查询、修正和删除。
 - 通过自然语言读写新版飞书 docx 文档和电子表格；文档支持 Markdown 追加/覆盖，表格支持区域读取、追加行和指定区域覆盖。
-- 消息去重、每 Agent 串行、全局并发上限、取消、超时、重启恢复、回复单独重试。
+- 接收并持久化图片、语音和普通文件；图片可传给视觉模型，语音通过本地 FFmpeg + faster-whisper 转写，文件交由 Agent 工具处理。Agent 可用 `send_media` 回传图片、OPUS/Ogg 语音条和普通文件。
+- 消息去重、每 Agent 串行、全局并发上限、取消、超时、重启恢复、文字与多媒体回复单独重试。
 - 现成 Pi Skill 目录接入；业务功能可继续扩展。
 - 模拟运行模式、本地真实模型模式、自动化测试、systemd 示例。
 
-**首版仅接收和发送文字。** 图片、文件、语音、流式卡片、Agent 相互委派和交易执行尚未实现。财务助理未内置任何行情供应商；它会明确说明没有实时数据，不能开箱即用盯盘。安装行情 Skill/工具后再建立相应计划。
+流式卡片、富文本/合并转发内附件、文本转语音、Agent 相互委派和交易执行尚未实现。财务助理未内置任何行情供应商；它会明确说明没有实时数据，不能开箱即用盯盘。安装行情 Skill/工具后再建立相应计划。
 
 ## 环境
 
@@ -25,6 +26,17 @@
 - 网络可访问 npm、飞书开放平台和你选用的模型服务。
 - 生产运行不需要开放入站端口；飞书使用向外建立的 WebSocket 长连接。
 - 建议用普通专用 OS 账户。编程助理的 shell 拥有这个账户的权限。
+- 语音转写需要 FFmpeg、Python 3 和 venv。默认 faster-whisper `base` INT8 模型，首次使用需下载约 142 MB 模型，之后离线运行。
+
+Ubuntu/Debian 安装本地 ASR：
+
+```bash
+sudo apt-get install ffmpeg python3-venv
+python3 -m venv data/asr/venv
+data/asr/venv/bin/pip install -r requirements-asr.txt
+```
+
+默认读取 `data/asr/venv/bin/python`，模型缓存到 `data/asr/models/`。可通过 `FASTER_WHISPER_PYTHON`、`FASTER_WHISPER_MODEL` 和 `FASTER_WHISPER_LANGUAGE` 环境变量调整；低内存主机保持默认 `base`，不要直接改用更大型号。Hugging Face 直连不可用时，可在首次下载前设置 `HF_ENDPOINT=https://hf-mirror.com`。
 
 ## 先在本地试运行
 
@@ -67,11 +79,12 @@ node scripts/identify-owner.mjs health
 # 其他机器人：
 node scripts/identify-owner.mjs finance
 node scripts/identify-owner.mjs coder
+node scripts/identify-owner.mjs joy
 ```
 
 在 5 分钟内，把脚本生成的 `pair ...` 文字私聊发给对应机器人。脚本会输出 `HEALTH_OWNER_OPEN_ID=...`（或对应 Agent 的变量），将这一行填入 `.env`。已经配置过时，直接查看 `.env` 中对应的变量即可，无需重复运行。
 
-先只启用健康助理也可以：为其他两个 Agent 增加 `enabled: false`。关闭的 Agent 不需要凭据；它的待执行任务和数据保留，重新启用后继续处理。
+先只启用健康助理也可以：为其他 Agent 增加 `enabled: false`。关闭的 Agent 不需要凭据；它的待执行任务和数据保留，重新启用后继续处理。
 
 ```bash
 npm run build
@@ -117,6 +130,10 @@ npm run chat -- --config config.yaml
 
 文档功能支持新版 docx 及指向 docx 的 Wiki 链接，写入保留常见 Markdown 格式，不支持图片和旧版 doc。电子表格支持 sheets 及指向电子表格的 Wiki 链接，可读取区域、追加行或覆盖明确指定的区域；多维表格不在支持范围内。覆盖属于破坏性修改，应明确说明目标；失败后请先人工检查再重试。
 
+可以直接发送独立图片、60 秒以内语音或普通文件，然后说“总结这个文件”“把这张图里的表格整理出来”。接收图片最大 10 MB，语音和文件最大 30 MB。语音在本机完成解码和转写，不依赖飞书 ASR 权限；转写失败会明确提示，不会把语音当成已理解。转写只判断语音内容，不等同于英语发音评分。图片理解要求当前模型支持 `image` 输入；纯文本模型只收到本地文件路径，不会声称已看懂图片。
+
+可以让 Agent 回传它在工作区生成或处理的文件，例如“生成一份 PDF 并发给我”。`send_media` 仅允许发送当前工作区和接收附件目录内的文件。语音条只接受 `.opus`/`.ogg` 且需要毫秒时长；MP3、WAV 等可作为普通文件发送。项目不内置文本转语音；用于回传的语音条需自行准备为 OPUS/Ogg。
+
 自然语言解析依赖所选模型。固定命令不调用模型：
 
 | 命令 | 用途 |
@@ -151,6 +168,7 @@ npm run chat -- --config config.yaml
 - `agents/<id>/memory.md`：该助理的长期记忆。
 - `agents/<id>/sessions/`：Pi 持久会话。
 - `agents/<id>/workspace/`：默认工作目录。
+- `agents/<id>/attachments/incoming/`：下载的图片、语音和文件；不会自动清理，备份和清理时需一并考虑。
 - `agents/<id>/pi/`：每 Agent 的 SDK 配置/认证状态位置。
 
 人格位于 `agents/<id>/persona.md`，共享资料位于 `shared/`；人格、记忆、共享资料和 Skill 内容在每次执行重新读取，模型和应用配置修改后需重启。
@@ -175,7 +193,7 @@ npm run chat -- --config config.yaml
 
 运行 `npm run check` 构建并测试；`npm run smoke` 做真实进程演示验证。
 
-测试包含消息去重、私聊身份过滤、每 Agent 串行和跨 Agent 并发、取消、时区/夏令时、定时任务管理与去重、恢复策略、回复重试、健康数据和记忆分离。文档测试覆盖链接校验、Wiki 解析、读取、Markdown 转换、追加、覆盖、内容分批和写入回执；电子表格测试覆盖链接与 Wiki 解析、区域读取、追加、指定区域覆盖和写入回执。两者均使用模拟飞书客户端，不访问真实文件。Pi 集成测试实际创建 SDK Session，通过本地 OpenAI 兼容 HTTP/SSE 模拟端点执行健康工具，并验证会话恢复与共享资料更新。
+测试包含消息去重、私聊身份过滤、每 Agent 串行和跨 Agent 并发、取消、时区/夏令时、定时任务管理与去重、恢复策略、回复重试、健康数据和记忆分离。多媒体测试覆盖事件解析、资源下载、语音转写、附件持久化、发送路径限制，以及图片/语音/文件上传和消息创建，均使用模拟飞书客户端与临时本地文件。文档测试覆盖链接校验、Wiki 解析、读取、Markdown 转换、追加、覆盖、内容分批和写入回执；电子表格测试覆盖链接与 Wiki 解析、区域读取、追加、指定区域覆盖和写入回执。Pi 集成测试实际创建 SDK Session，通过本地 OpenAI 兼容 HTTP/SSE 模拟端点执行健康工具，并验证会话恢复与共享资料更新。
 
 自动化测试默认不使用真实飞书应用或付费模型 Key。本次已用真实飞书应用和实际模型配置完成 coder 与 finance 私聊、`Get` 表情及正式回复联调；这不代表对所有模型任务质量的评价。部署后请先按部署文档的验收步骤验证。所有依赖版本已固定在 `package-lock.json`。
 

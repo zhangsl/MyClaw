@@ -1,11 +1,12 @@
-import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import { basename, join, resolve, sep } from 'node:path';
 import { z } from 'zod';
 import type { AgentConfig } from './config.js';
 import type { DocumentService, Run, SpreadsheetService } from './types.js';
 import { Store } from './store.js';
 import { Scheduler } from './scheduler.js';
 import { id, localDay } from './util.js';
+import { MAX_IMAGE_BYTES, MAX_MEDIA_BYTES, mimeTypeForFile } from './media.js';
 
 export class Services {
   constructor(readonly store: Store, readonly scheduler: Scheduler, readonly timezone: string, readonly documents?: DocumentService, readonly spreadsheets?: SpreadsheetService) {}
@@ -101,6 +102,25 @@ export class Services {
       const a = z.object({ id: z.string(), operation: z.enum(['pause', 'resume', 'delete']) }).strict().parse(args);
       this.scheduler.change(agent.id, run.chat_id, a.id, a.operation);
       return { done: true, ...a };
+    }
+    if (tool === 'send_media') {
+      const a = z.object({
+        path: z.string().min(1).max(4096), kind: z.enum(['image', 'audio', 'file']).default('file'),
+        durationMs: z.number().int().min(1).max(3600_000).optional(),
+      }).strict().parse(args);
+      const workspace = agent.workspace!;
+      const requested = resolve(workspace, a.path);
+      const path = realpathSync(requested);
+      const roots = [workspace, join(agent.directory, 'attachments', 'incoming')]
+        .filter(root => existsSync(root)).map(root => realpathSync(root));
+      if (!roots.some(root => path === root || path.startsWith(root + sep)) || !statSync(path).isFile()) throw new Error('只能发送当前工作区或本次接收附件目录中的文件');
+      const size = statSync(path).size;
+      if (!size || size > (a.kind === 'image' ? MAX_IMAGE_BYTES : MAX_MEDIA_BYTES)) throw new Error(a.kind === 'image' ? '图片须为 1 字节至 10 MB' : '文件须为 1 字节至 30 MB');
+      const name = basename(path);
+      if (a.kind === 'image' && !mimeTypeForFile(name).startsWith('image/')) throw new Error('图片扩展名不受支持');
+      if (a.kind === 'audio' && (!['.opus', '.ogg'].some(ext => name.toLowerCase().endsWith(ext)) || !a.durationMs)) throw new Error('语音必须为 .opus 或 .ogg 文件，并提供毫秒时长 durationMs');
+      const messageId = this.store.queueMedia(agent.id, run.chat_id, a.kind, path, name, mimeTypeForFile(name), `media:${run.id}:${a.path}:${a.kind}`, run.id, a.durationMs);
+      return { queued: true, message_id: messageId, kind: a.kind, name, size };
     }
     if (tool === 'health_record' && agent.healthTools) {
       const a = z.object({ kind: z.enum(['weight', 'exercise']), day: z.string().default(localDay(this.timezone)),

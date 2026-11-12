@@ -59,3 +59,22 @@ agents:
       appIdEnv: CODER_FEISHU_APP_ID
       appSecretEnv: CODER_FEISHU_APP_SECRET
       ownerOpenIdEnv: CODER_OWNER_OPEN_ID
+
+  - id: joy
+    name: 私人助理
+    persona: agents/joy/persona.md
+    skills: [agents/joy/skills]
+    sharedKnowledge: [shared/profile.md, shared/preferences.md]
+    builtinTools: [read, bash, edit, write, grep, find, ls]
+    # 默认使用 data/agents/joy/workspace。指定已有目录时改为绝对路径：
+    # workspace: /srv/personal
+    timeoutSeconds: 900
+    maxToolCalls: 100
+    model:
+      provider: anthropic
+      id: claude-sonnet-4-5
+      apiKeyEnv: ANTHROPIC_API_KEY
+    feishu:
+      appIdEnv: JOY_FEISHU_APP_ID
+      appSecretEnv: JOY_FEISHU_APP_SECRET
+      ownerOpenIdEnv: JOY_OWNER_OPEN_ID

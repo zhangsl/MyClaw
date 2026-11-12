@@ -21,6 +21,9 @@ export function makeTools(agent: AgentConfig, run: Run, services: Services, sign
     { name: 'schedule_update', description: '完整替换一个已有计划的设置。先 list 获取当前值，合并用户修改；不改变暂停状态。', parameters: Type.Object({ id: Type.String(), schedule: scheduleSchema }) },
     { name: 'schedule_change', description: '暂停、恢复或删除当前聊天的指定计划。', parameters: Type.Object({ id: Type.String(), operation: Type.Union(['pause', 'resume', 'delete'].map(x => Type.Literal(x))) }) },
   ];
+  definitions.push(
+    { name: 'send_media', description: '把当前工作区或本次接收附件目录中的本地文件加入飞书发送队列。path 为绝对路径或相对工作区路径；kind 可选 image/audio/file，默认 file。图片最大 10 MB，其他最大 30 MB。audio 仅支持 .opus/.ogg 且必须提供毫秒时长 durationMs；其他音频用 file 发送。工具成功仅表示已入队，不代表对方已收到。', parameters: Type.Object({ path: Type.String({ minLength: 1, maxLength: 4096 }), kind: Type.Optional(Type.Union([Type.Literal('image'), Type.Literal('audio'), Type.Literal('file')])), durationMs: Type.Optional(Type.Integer({ minimum: 1, maximum: 3600000 })) }) },
+  );
   if (agent.healthTools) definitions.push(
     { name: 'health_record', description: '记录用户明确报告的体重(kg)或每日累计运动时长(分钟)。day 为 YYYY-MM-DD，省略则是用户时区今天。同一天同类型记录替换旧值；运动时长须为当天累计总量。不推测缺失数据。', parameters: Type.Object({ kind: Type.Union([Type.Literal('weight'), Type.Literal('exercise')]), value: Type.Number(), day: Type.Optional(Type.String()), note: Type.Optional(Type.String()) }) },
     { name: 'health_query', description: '读取最近的体重或运动记录，按日期倒序。', parameters: Type.Object({ kind: Type.Union([Type.Literal('weight'), Type.Literal('exercise')]), limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 366 })) }) },

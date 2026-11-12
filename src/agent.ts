@@ -1,7 +1,7 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  createAgentSession, DefaultResourceLoader, loadSkills, ModelRuntime, SessionManager, SettingsManager,
+  createAgentSession, DefaultResourceLoader, detectSupportedImageMimeTypeFromFile, loadSkills, ModelRuntime, SessionManager, SettingsManager,
 } from '@earendil-works/pi-coding-agent';
 import type { AgentConfig, Config } from './config.js';
 import type { Engine, EngineRequest } from './types.js';
@@ -57,6 +57,7 @@ export class PiEngine implements Engine {
       `你是 MyClaw 的 ${agent.name}，Agent ID 为 ${agent.id}。用户时区是 ${this.config.timezone}。`,
       readFileSync(agent.persona, 'utf8'),
       '你通过飞书私聊服务用户。不要声称已执行尚未成功的工具操作。工具返回成功才代表已保存记录或计划。',
+      '图片、语音和文件会保存到本地并在任务中列出路径。语音转写可能有误，应视为用户输入但不确定时先确认。需要回传本地文件时调用 send_media；它只表示加入发送队列，不要声称对方已经收到。',
       '已有会话中的旧资料可能过时，以下私有记忆与共享知识是本次执行的最新版本。共享知识默认只读。',
       `私有记忆:\n${this.services.memory(agent)}`,
       `共享知识:\n${shared || '无'}`,
@@ -101,7 +102,15 @@ export class PiEngine implements Engine {
       signal.throwIfAborted();
       if (session.sessionFile) onSession(session.sessionFile);
       const timestamp = new Intl.DateTimeFormat('zh-CN', { timeZone: this.config.timezone, dateStyle: 'full', timeStyle: 'long' }).format();
-      await session.prompt(`当前时间：${timestamp}\n任务来源：${run.kind === 'scheduled' ? '后台定时任务（独立会话）' : '用户私聊'}\n\n${run.input}`, { expandPromptTemplates: false });
+      const attachmentContext = run.attachments.length ? `\n\n用户附件：\n${run.attachments.map(a =>
+        `- ${a.kind} ${a.name}（${a.size} 字节）\n  本地路径：${a.path}${a.transcript ? `\n  语音转写：${a.transcript}` : ''}${a.kind === 'image' && !model.input.includes('image') ? '\n  当前模型不支持图片输入，只能读取本地文件，不能声称已看懂图片。' : ''}`).join('\n')}` : '';
+      const images = model.input.includes('image')
+        ? (await Promise.all(run.attachments.filter(a => a.kind === 'image').map(async a => {
+          const mimeType = await detectSupportedImageMimeTypeFromFile(a.path);
+          return mimeType ? [{ type: 'image' as const, data: readFileSync(a.path).toString('base64'), mimeType }] : [];
+        }))).flat()
+        : [];
+      await session.prompt(`当前时间：${timestamp}\n任务来源：${run.kind === 'scheduled' ? '后台定时任务（独立会话）' : '用户私聊'}\n\n${run.input}${attachmentContext}`, { expandPromptTemplates: false, images });
       signal.throwIfAborted();
       if (budgetExceeded) throw new Error('超过本次工具调用上限');
       // Check the final assistant message: an earlier failed request may have recovered through SDK retry.
