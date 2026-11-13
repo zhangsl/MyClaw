@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch for MyClaw restart requests
+
+[Path]
+PathChanged=/opt/myclaw/data/restart-request
+Unit=myclaw-restart.service
+
+[Install]
+WantedBy=multi-user.target

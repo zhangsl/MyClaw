@@ -1,0 +1,8 @@
+[Unit]
+Description=Schedule a delayed MyClaw restart
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/local/sbin/myclaw-restart
+NoNewPrivileges=true
