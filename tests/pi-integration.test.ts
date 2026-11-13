@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
-import { writeFileSync, existsSync } from 'node:fs';
+import { writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { PiEngine } from '../src/agent.js';
 import { fixture } from './helpers.js';
@@ -35,10 +35,14 @@ test('real Pi SDK calls a local model, executes a health tool, resumes session a
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, compat: { supportsDeveloperRole: false, supportsStore: false } }],
     } } }));
     const sharedFile = join(f.root, 'shared.md'); writeFileSync(sharedFile, '共同偏好版本一');
+    const sharedSkillDir = join(f.root, 'shared', 'skills', 'shared-context');
+    mkdirSync(sharedSkillDir, { recursive: true });
+    writeFileSync(join(sharedSkillDir, 'SKILL.md'), '---\nname: shared-context\ndescription: SHARED_SKILL_DESCRIPTION\n---\n\nSHARED_SKILL_BODY');
     f.config.modelsFile = modelsFile;
     f.config.agents = [f.config.agents[0]];
     f.config.agents[0].model = { provider: 'local-test', id: 'myclaw-test' };
     f.config.agents[0].sharedKnowledge = [sharedFile];
+    f.config.agents[0].builtinTools = ['read'];
     const engine = new PiEngine(f.config, f.services);
     await engine.checkModels();
     f.store.enqueue('health', 'chat-health', 'first', '今天体重72.3公斤');
@@ -51,6 +55,11 @@ test('real Pi SDK calls a local model, executes a health tool, resumes session a
     assert.ok(existsSync(sessionFile));
     assert.ok(requests[1].messages.some((m: any) => m.role === 'tool' && m.content.includes('72.3')));
     assert.ok(!requests[0].tools.some((t: any) => t.function.name === 'bash'));
+    const initialSystemPrompt = JSON.stringify(requests[0].messages[0]);
+    assert.ok(initialSystemPrompt.includes('shared-context'));
+    assert.ok(initialSystemPrompt.includes('SHARED_SKILL_DESCRIPTION'));
+    assert.ok(initialSystemPrompt.includes(join(sharedSkillDir, 'SKILL.md')));
+    assert.ok(!initialSystemPrompt.includes('SHARED_SKILL_BODY'));
     writeFileSync(sharedFile, '共同偏好版本二');
     f.store.enqueue('health', 'chat-health', 'second', '继续');
     const second = f.store.claim([])!;

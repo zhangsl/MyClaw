@@ -171,7 +171,7 @@ npm run chat -- --config config.yaml
 - `agents/<id>/attachments/incoming/`：下载的图片、语音和文件；不会自动清理，备份和清理时需一并考虑。
 - `agents/<id>/pi/`：每 Agent 的 SDK 配置/认证状态位置。
 
-人格位于 `agents/<id>/persona.md`，共享资料位于 `shared/`；人格、记忆、共享资料和 Skill 内容在每次执行重新读取，模型和应用配置修改后需重启。
+人格位于 `agents/<id>/persona.md`，共享资料位于 `shared/`，所有 Agent 自动加载 `shared/skills/` 下的共享 Skill；人格、记忆、共享资料和 Skill 内容在每次执行重新读取，模型和应用配置修改后需重启。
 
 默认同一 Agent 同时一个任务，整个程序最多两个。普通聊天优先于待执行的后台任务；固定文字提醒直接进入发送队列，不占 Agent 运行名额。
 

@@ -76,7 +76,7 @@ export class PiEngine implements Engine {
       noExtensions: true, disabledBuiltinExtensions: ['mcp', 'codemode', 'tool-search'],
       noSkills: true, noContextFiles: true, noPromptTemplates: true, noThemes: true,
       systemPrompt,
-      skillsOverride: () => loadSkills({ cwd: workspace, agentDir, skillPaths: agent.skills, includeDefaults: false }),
+      skillsOverride: () => loadSkills({ cwd: workspace, agentDir, skillPaths: [...agent.skills, join(this.config.root, 'shared', 'skills')], includeDefaults: false }),
     });
     await resourceLoader.reload();
     signal.throwIfAborted();

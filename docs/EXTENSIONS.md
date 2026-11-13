@@ -10,9 +10,11 @@
 
 将你信任的 Pi Skill 文件夹放到例如 `agents/finance/skills/<skill-name>/`，其根文件为 `SKILL.md`。该目录已在财务助理配置中。
 
-本项目使用 SDK 的 `loadSkills`，仅从配置的 skill 路径发现资源，不隐式读取服务器账户的全局 Skill、扩展或上层目录中的上下文。
+所有 Agent 共享的 Skill 放在 `shared/skills/<skill-name>/`，无需在各 Agent 的 `skills` 配置中重复添加路径。每次运行都会同时加载该共享目录和当前 Agent 的私有目录；同名 Skill 由私有目录优先。
 
-Skill 的描述会提供给模型，模型使用 `read` 读取完整说明。若 Skill 需要运行脚本，在该 Agent 的 `builtinTools` 中显式增加 `bash`，并安装其所需的语言环境和依赖。这会授予该 Agent 运行账户的命令执行能力。仅有 Skill 说明文件并不会自动获得行情 API、凭据或可执行工具。
+本项目使用 SDK 的 `loadSkills`，仅从配置的私有 skill 路径和上述共享目录发现资源，不隐式读取服务器账户的全局 Skill、扩展或上层目录中的上下文。
+
+Skill 的名称、描述和完整路径会提供给模型，模型使用 `read` 按需读取完整说明，无需用户提醒路径。若 Skill 需要运行脚本，在该 Agent 的 `builtinTools` 中显式增加 `bash`，并安装其所需的语言环境和依赖。这会授予该 Agent 运行账户的命令执行能力。仅有 Skill 说明文件并不会自动获得行情 API、凭据或可执行工具。
 
 首版不自动加载 Pi Extension/第三方 npm 插件，也不自动接入 MCP。已有 Skill 如依赖这些机制，需在 `src/agent.ts` 的资源配置中显式接入，不能假设放入 Skill 文件就全部可用。
 
